@@ -1,0 +1,20 @@
+logging:
+  format: parquet
+  output_dir: /home/nguyen/ur_ws/curobo_ursim/logs/singularity_data
+robot:
+  model_file: ur3e.yml
+  name: ur3e
+  rtde_ip: 127.0.0.1
+safe_return:
+  recovery_speed: 0.2
+  safe_pose:
+  - 0.0
+  - -1.5708
+  - -1.5708
+  - -1.5708
+  - 1.5708
+  - 0.0
+thresholds:
+  max_qd_ratio: 1.0
+  sigma_min_danger: 0.015
+  sigma_min_warn: 0.03
