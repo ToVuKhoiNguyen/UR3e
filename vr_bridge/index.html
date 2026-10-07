@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>UR3e WebXR Controller</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; margin-top: 50px; background-color: #f0f0f0; }
+        h1 { color: #333; }
+        #enter-vr { padding: 15px 30px; font-size: 20px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+        #status { margin-top: 20px; font-size: 18px; color: #555; }
+    </style>
+</head>
+<body>
+    <h1>UR3e VR Teleoperation</h1>
+    <button id="enter-vr" disabled>Checking VR support...</button>
+    <div id="status">Connecting to WebSocket...</div>
+
+    <script>
+        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = wsProtocol + "//" + window.location.hostname + ":8444";
+        let ws = new WebSocket(wsUrl);
+        let statusEl = document.getElementById('status');
+        let btnEnterVR = document.getElementById('enter-vr');
+
+        ws.onopen = () => { statusEl.innerText = "WebSocket Connected. Ready for VR."; };
+        ws.onclose = () => { statusEl.innerText = "WebSocket Disconnected. Please refresh."; };
+        ws.onerror = (e) => { statusEl.innerText = "WebSocket Error!"; console.error(e); };
+
+        let xrSession = null;
+        let xrRefSpace = null;
+
+        if (navigator.xr) {
+            navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+                if (supported) {
+                    btnEnterVR.innerText = "Enter VR";
+                    btnEnterVR.disabled = false;
+                    btnEnterVR.onclick = onEnterVR;
+                } else {
+                    btnEnterVR.innerText = "VR Not Supported";
+                }
+            });
+        } else {
+            btnEnterVR.innerText = "WebXR not found on browser";
+        }
+
+        function onEnterVR() {
+            if (!xrSession) {
+                navigator.xr.requestSession('immersive-vr').then(onSessionStarted);
+            } else {
+                xrSession.end();
+            }
+        }
+
+        function onSessionStarted(session) {
+            xrSession = session;
+            btnEnterVR.innerText = "Exit VR";
+            session.addEventListener('end', onSessionEnded);
+
+            session.requestReferenceSpace('local').then((refSpace) => {
+                xrRefSpace = refSpace;
+                session.requestAnimationFrame(onXRFrame);
+            });
+        }
+
+        function onSessionEnded(event) {
+            xrSession = null;
+            btnEnterVR.innerText = "Enter VR";
+        }
+
+        function onXRFrame(t, frame) {
+            let session = frame.session;
+            session.requestAnimationFrame(onXRFrame);
+
+            if (ws.readyState !== WebSocket.OPEN) return;
+
+            for (let source of session.inputSources) {
+                if (!source.gripSpace) continue;
+                
+                // For this demo, let's track the RIGHT controller to move the robot
+                if (source.handedness === 'right') {
+                    let pose = frame.getPose(source.gripSpace, xrRefSpace);
+                    if (pose) {
+                        let pos = pose.transform.position;
+                        let quat = pose.transform.orientation;
+                        
+                        let triggerPressed = false;
+                        if (source.gamepad && source.gamepad.buttons.length > 0) {
+                            // Nút cò súng (Index Trigger) luôn là nút số 0 trong WebXR Gamepad API
+                            triggerPressed = source.gamepad.buttons[0].pressed;
+                        }
+                        
+                        // Send data to python backend
+                        let data = {
+                            hand: 'right',
+                            pos: [pos.x, pos.y, pos.z],
+                            quat: [quat.w, quat.x, quat.y, quat.z],
+                            trigger: triggerPressed
+                        };
+                        ws.send(JSON.stringify(data));
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
