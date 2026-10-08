@@ -112,6 +112,40 @@ Mở trình duyệt Web (Chrome/Firefox) và truy cập địa chỉ: **[http://
 3. Chú ý quan sát tay máy thật (hoặc trên màn hình), nó sẽ giật và bám theo con chuột của bạn lập tức 20 lần/giây mà không hề có độ trễ.
 4. Thử cố tình kéo trục tọa độ một góc vặn vẹo thật khó hoặc sát vào vật cản, Cổng an toàn sẽ lập tức ngắt động cơ và hiện cảnh báo "Lỗi vặn xoắn khớp" để bảo vệ phần cứng.
 
+### 5. Hướng dẫn Chạy VR Teleop Toàn tập (Meta Quest 3S)
+
+Hệ thống hỗ trợ điều khiển cánh tay Robot bằng kính Meta Quest 3S thông qua công nghệ WebXR, AR Xuyên thấu (Passthrough) và Buồng lái ảo (Virtual Cockpit).
+
+**Bước 1: Khởi động Máy ảo URSim**
+Mở Terminal 1 và chạy lệnh để tự động tải & bật giả lập UR3e:
+```bash
+ros2 run ur_client_library start_ursim.sh -m ur3e
+```
+
+**Bước 2: Khởi động Server VR & Giao diện Điều khiển**
+Mở Terminal 2, thiết lập PYTHONPATH và chạy file chính:
+```bash
+cd /home/nguyen/ur_ws/curobo_ursim
+export PYTHONPATH=/home/nguyen/ur_ws/curobo_ursim:$PYTHONPATH
+source ~/curobo/.venv/bin/activate
+python teleop_quest/main_quest.py
+```
+*(Hệ thống sẽ **tự động dò tìm địa chỉ IP hiện tại của máy tính**, tự động nặn chứng chỉ SSL tương ứng và in đường link truy cập ra màn hình Terminal. Khi bạn đổi mạng Wi-Fi/Hotspot, hệ thống cũng sẽ tự động làm lại từ đầu).*
+
+**Bước 3: Đeo Kính & Vào Buồng Lái Ảo (Virtual Cockpit)**
+Do sử dụng chứng chỉ bảo mật tự tạo (Self-signed) cho IP LAN, bạn cần "Thông chốt" 1 lần duy nhất cho mỗi IP mới:
+1. Đeo kính Quest (đảm bảo chung mạng Wi-Fi Hotspot với Laptop).
+2. Mở trình duyệt Web của Quest, truy cập **Cổng Dữ Liệu Ngầm**: `https://[IP_HIỆN_TẠI]:8444` $\rightarrow$ Trình duyệt cảnh báo đỏ $\rightarrow$ Bấm **Advanced $\rightarrow$ Proceed** $\rightarrow$ Đóng Tab.
+3. Truy cập **Cổng Giao Diện**: `https://[IP_HIỆN_TẠI]:8443` $\rightarrow$ Trình duyệt cảnh báo đỏ $\rightarrow$ Bấm **Advanced $\rightarrow$ Proceed**.
+4. Trải nghiệm màn hình **Welcome Screen Gradient** chuẩn công nghiệp hiện ra. Bấm nút **START IMMERSIVE VR**.
+5. Đeo kính và cấp quyền WebXR. Xung quanh bạn sẽ chuyển sang chế độ AR nhìn xuyên thấu, đồng thời Bảng điều khiển ảo (Virtual Cockpit) sẽ hiển thị thông số Robot Telemetry.
+
+**Bước 4: Cơ chế Điều khiển Thực chiến (Base Frame + Delta Rotation)**
+- **Kích hoạt Teleop:** Trên giao diện 2D của Viser (Laptop), tích chọn ô **`Enable Teleoperation`** (hoặc dùng laser bấm trên kính).
+- **Cơ chế Nhấc Chuột (Clutch):** Để điều khiển, bạn phải **bóp giữ ĐỒNG THỜI Cò (Trigger) + Nút hông (Grip)**. Nếu mỏi tay hoặc quá tầm với, thả 2 nút ra, kéo tay về vị trí thoải mái rồi bóp giữ lại để "túm" không gian một lần nữa.
+- **Tịnh tiến (Base Frame):** Khi bóp giữ và đẩy tay tới trước mặt, robot sẽ lao thẳng ra phía trước (theo trục X của đế) một cách dễ đoán như lái ô tô, bất kể đầu robot đang chĩa đi đâu. 
+- **Xoay cổ tay (Delta Rotation):** Khi bóp giữ và xoay vặn cổ tay, robot sẽ vặn cổ tay đúng một góc bằng với góc cổ tay bạn vừa vặn thêm. Cực kỳ an toàn, chống giật mình vặn xoắn!
+- **Độ mượt (EMA Filter):** Tín hiệu 60Hz từ Quest được đi qua bộ lọc thông thấp (EMA - Exponential Moving Average) giúp tay máy di chuyển "lả lướt" và hoàn toàn loại bỏ độ rung (jitter) của tay người.
 ## Lưu ý An toàn (Safety Warnings)
 
 Do hệ thống sử dụng tập lệnh truyền động liên tục `servoJ`, mô-tơ tay máy sẽ phản ứng cực kỳ bạo lực và không khoan nhượng. 

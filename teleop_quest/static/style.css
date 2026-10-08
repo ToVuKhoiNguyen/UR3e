@@ -1,0 +1,516 @@
+/* URSim Polyscope Style for VR Cockpit */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    text-align: center;
+    margin-top: 50px;
+    background-color: #f0f0f0;
+}
+
+:xr-overlay,
+:xr-overlay body {
+    background-color: transparent !important;
+}
+
+#status {
+    font-size: 18px;
+    color: #333;
+    margin-top: 20px;
+}
+
+button {
+    cursor: pointer;
+}
+
+#btn-preview-ui {
+    font-size: 20px;
+    padding: 10px 20px;
+    margin: 10px;
+    border-radius: 8px;
+    border: none;
+    background-color: #2196F3;
+    color: white;
+}
+
+#btn-enter-vr {
+    font-size: 20px;
+    padding: 10px 20px;
+    margin: 10px;
+    border-radius: 8px;
+    border: none;
+    background-color: #4CAF50;
+    color: white;
+}
+
+/* Root WebXR Overlay Container */
+#vr-overlay {
+    display: none;
+    width: 100vw;
+    height: 100vh;
+    justify-content: center;
+    align-items: center;
+    pointer-events: none;
+}
+
+/* URSim Main Window */
+#cockpit-panel {
+    width: 96vw;
+    height: 96vh;
+    background: #ffffff;
+    border-radius: 12px;
+    border: 2px solid #555;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+    display: flex;
+    flex-direction: column;
+    pointer-events: auto;
+    overflow: hidden;
+    /* For border radius */
+}
+
+/* Header */
+.cockpit-header {
+    height: 50px;
+    background-color: #333;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 15px;
+    font-size: 16px;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    font-weight: bold;
+    font-size: 18px;
+}
+
+.header-center {
+    color: #aaa;
+    font-family: monospace;
+}
+
+.btn-top-menu {
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 20px;
+    padding: 5px 10px;
+}
+
+.btn-top-menu:hover {
+    background: #555;
+}
+
+/* Body */
+.cockpit-body {
+    display: flex;
+    flex: 1;
+    background-color: #fff;
+}
+
+/* Sidebar Cards */
+.sidebar {
+    width: 250px;
+    background-color: #f8fafc;
+    border-right: 1px solid #ccc;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 12px;
+}
+
+.status-card {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.card-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: #64748b;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 4px;
+}
+
+.card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 14px;
+    color: #334155;
+}
+
+.val-text {
+    font-weight: bold;
+}
+
+.badge {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+}
+
+.badge.green {
+    background-color: #10b981;
+}
+
+.badge.blue {
+    background-color: #3b82f6;
+}
+
+.badge.red {
+    background-color: #ef4444;
+}
+
+.badge.orange {
+    background-color: #f59e0b;
+}
+
+.badge.gray {
+    background-color: #94a3b8;
+}
+
+/* Main Form (Center) */
+.main-form {
+    width: 380px;
+    padding: 10px;
+    border-right: 1px solid #ccc;
+    text-align: left;
+}
+
+.section-title {
+    background: #d5d5d5;
+    padding: 8px 10px;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 15px;
+}
+
+.form-group {
+    margin-bottom: 25px;
+    padding: 0 10px;
+}
+
+.form-group label {
+    display: block;
+    font-weight: bold;
+    margin-bottom: 10px;
+    color: #222;
+}
+
+.input-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.axis-label {
+    width: 30px;
+    font-size: 16px;
+    color: #555;
+}
+
+.fake-input {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    border: 2px solid #3498db;
+    padding: 5px 10px;
+    font-family: monospace;
+    font-size: 18px;
+    background: #fff;
+    color: #000;
+}
+
+.fake-input .unit {
+    color: #888;
+}
+
+/* Visualization (Right) */
+.visualization {
+    flex: 1;
+    padding: 10px;
+    background: #f5f5f5;
+    display: flex;
+    flex-direction: column;
+}
+
+#cam-stream {
+    flex: 0.5;
+    /* Takes up half */
+    background: #222;
+    border: 1px solid #aaa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+    font-size: 20px;
+    min-height: 200px;
+}
+
+#viser-view {
+    flex: 0.5;
+    /* Takes up the other half */
+    background: #fff;
+    border: 1px solid #aaa;
+    display: flex;
+    overflow: hidden;
+    min-height: 200px;
+}
+
+/* Footer */
+.cockpit-footer {
+    height: 60px;
+    background-color: #444;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+}
+
+.footer-left {
+    display: flex;
+    align-items: center;
+}
+
+.status-indicator {
+    width: 25px;
+    height: 25px;
+    border-radius: 50%;
+    border: 3px solid #777;
+    background: #222;
+    margin-right: 10px;
+}
+
+.status-indicator.running {
+    background: #2ecc71;
+    border-color: #fff;
+    box-shadow: 0 0 10px #2ecc71;
+}
+
+.status-text {
+    color: white;
+    font-size: 20px;
+}
+
+.footer-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 300px;
+}
+
+.speed-slider-container {
+    width: 100%;
+    position: relative;
+    height: 20px;
+}
+
+.speed-slider-track {
+    width: 100%;
+    height: 8px;
+    background: #222;
+    border-radius: 4px;
+    margin-top: 6px;
+    position: relative;
+}
+
+.speed-slider-fill {
+    width: 100%;
+    height: 100%;
+    background: #3498db;
+    border-radius: 4px;
+}
+
+.speed-slider-thumb {
+    width: 16px;
+    height: 16px;
+    background: #3498db;
+    border-radius: 50%;
+    position: absolute;
+    right: -8px;
+    top: -4px;
+}
+
+.speed-text {
+    color: #ccc;
+    font-size: 14px;
+    margin-top: 5px;
+}
+
+.footer-right {
+    display: flex;
+    align-items: center;
+}
+
+#btn-estop {
+    background-color: #fff;
+    color: #e74c3c;
+    border: 2px solid #e74c3c;
+    font-size: 20px;
+    font-weight: bold;
+    padding: 10px 20px;
+    border-radius: 20px;
+}
+
+#btn-estop:hover {
+    background-color: #e74c3c;
+    color: #fff;
+}
+
+#btn-estop:active {
+    transform: scale(0.95);
+}
+
+/* Launcher Screen */
+#launcher-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, #1e293b, #0f172a);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+}
+
+.launcher-card {
+    background: #ffffff;
+    width: 500px;
+    border-radius: 16px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    animation: slideUp 0.5s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.launcher-header {
+    background: #2563eb;
+    color: white;
+    padding: 30px;
+    text-align: center;
+}
+
+.logo-circle {
+    width: 60px;
+    height: 60px;
+    background: white;
+    color: #2563eb;
+    border-radius: 50%;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 24px;
+    font-weight: bold;
+    margin-bottom: 15px;
+}
+
+.launcher-header h2 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 600;
+}
+
+.launcher-body {
+    padding: 30px;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.info-label {
+    color: #64748b;
+    font-weight: 500;
+}
+
+.info-value {
+    color: #0f172a;
+    font-family: monospace;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.info-value.warning {
+    color: #f59e0b;
+}
+
+.info-value.success {
+    color: #10b981;
+}
+
+.action-buttons {
+    margin-top: 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.action-buttons button {
+    width: 100%;
+    padding: 15px;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+}
+
+.btn-primary {
+    background: #10b981;
+    color: white;
+    box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+}
+
+.btn-primary:hover {
+    background: #059669;
+    transform: translateY(-2px);
+}
+
+.btn-secondary {
+    background: #3b82f6;
+    color: white;
+    box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+}
+
+.btn-secondary:hover {
+    background: #2563eb;
+    transform: translateY(-2px);
+}
+
+.launcher-footer {
+    background: #f8fafc;
+    padding: 15px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 12px;
+}

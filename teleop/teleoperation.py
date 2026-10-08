@@ -269,7 +269,11 @@ class TeleoperationController:
         # khoảng cách sẽ bị giãn ra liên tục dẫn đến lỗi "nhảy vọt góc khớp" giả.
         q_seed = self._last_valid_q if self._last_valid_q is not None else q_real
         
-        result_pk = self._pyroki.solve(pose, q_seed)
+        if self._pyroki:
+            result_pk = self._pyroki.solve(pose, q_seed)
+        else:
+            result_pk = {"q": None, "latency_ms": 0.0, "solver": "pyroki"}
+            
         result_cu = self._curobo.solve(pose, q_seed)
 
         with self._lock:

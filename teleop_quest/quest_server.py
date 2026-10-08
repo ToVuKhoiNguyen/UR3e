@@ -19,6 +19,9 @@ class QuestServer:
         self._latest_frame = None
         self._last_seen = 0.0
         self._connected = False
+        self._active_ws = None
+        self._loop = None
+        self._estop_triggered = False
 
     def start(self):
         # Khởi động HTTPS server (chạy daemon thread)
@@ -40,6 +43,24 @@ class QuestServer:
     def is_connected(self) -> bool:
         with self._lock:
             return self._connected
+            
+    def check_and_clear_estop(self) -> bool:
+        with self._lock:
+            if self._estop_triggered:
+                self._estop_triggered = False
+                return True
+            return False
+
+    def send_haptic(self, intensity: float = 1.0, duration: float = 100):
+        with self._lock:
+            ws = self._active_ws
+            loop = self._loop
+        if ws and loop:
+            try:
+                msg = json.dumps({"type": "haptic", "intensity": intensity, "duration": duration})
+                asyncio.run_coroutine_threadsafe(ws.send(msg), loop)
+            except Exception:
+                pass
 
     def _run_http(self):
         # Cấu hình HTTPServer
@@ -67,7 +88,9 @@ class QuestServer:
                 print(f"[Quest] HTTPS Error: {e}")
 
     def _run_ws(self):
-        asyncio.run(self._ws_main())
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_until_complete(self._ws_main())
 
     async def _ws_main(self):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -78,13 +101,17 @@ class QuestServer:
             print(f"[Quest] WebSocket connected from {remote_ip}")
             with self._lock:
                 self._connected = True
+                self._active_ws = websocket
             try:
                 async for message in websocket:
                     try:
                         data = json.loads(message)
                         with self._lock:
-                            self._latest_frame = data
-                            self._last_seen = time.time()
+                            if data.get("type") == "estop":
+                                self._estop_triggered = True
+                            else:
+                                self._latest_frame = data
+                                self._last_seen = time.time()
                     except json.JSONDecodeError:
                         pass
             except websockets.exceptions.ConnectionClosed:
@@ -93,6 +120,8 @@ class QuestServer:
                 with self._lock:
                     self._connected = False
                     self._latest_frame = None
+                    if self._active_ws == websocket:
+                        self._active_ws = None
 
         try:
             async with websockets.serve(handler, self.host, self.ws_port, ssl=context):
@@ -120,6 +149,10 @@ if __name__ == "__main__":
     print("Press Ctrl+C to stop.")
     try:
         while True:
-            time.sleep(1)
+            frame = server.get_frame()
+            if frame:
+                # Xóa màn hình terminal và in đè lên
+                print(f"\r[Tọa độ VR] X:{frame['pos'][0]:.3f} | Y:{frame['pos'][1]:.3f} | Z:{frame['pos'][2]:.3f} | Trigger: {frame.get('trigger')} | Grip: {frame.get('grip')}     ", end="", flush=True)
+            time.sleep(0.1)
     except KeyboardInterrupt:
-        pass
+        print("\n[Đã thoát]")

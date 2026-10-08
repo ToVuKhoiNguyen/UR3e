@@ -4,128 +4,191 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Meta Quest VR Teleop</title>
-    <style>
-        body { font-family: sans-serif; text-align: center; margin-top: 50px; background-color: #f0f0f0; }
-        button { font-size: 20px; padding: 10px 20px; margin: 10px; cursor: pointer; border-radius: 8px; border: none; background-color: #4CAF50; color: white; }
-        #status { font-size: 18px; color: #333; margin-top: 20px; }
-    </style>
+    <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
-    <h1>Meta Quest VR Teleop</h1>
-    <p>Host: <span id="host-ip"></span></p>
-    <button id="btn-enter-vr" style="display: none;">Enter VR</button>
-    <div id="status">Connecting WebSocket...</div>
+    <!-- LAUNCHER SCREEN (Màn hình chờ 2D) -->
+    <div id="launcher-screen">
+        <!-- Top Nav -->
+        <div class="launcher-nav">
+            <div class="nav-logo">
+                <div class="logo-circle">UR</div>
+                <span class="nav-title">UR3e TELEOP</span>
+            </div>
+            <div class="nav-links">
+                <div class="nav-status">Host: <span id="host-ip" style="font-weight: 600;">...</span></div>
+                <div id="status" class="nav-status warning">Connecting WebSocket...</div>
+            </div>
+        </div>
+        
+        <!-- Hero Content -->
+        <div class="launcher-hero">
+            <h1 class="hero-title">WELCOME</h1>
+            <p class="hero-subtitle">
+                Hệ thống điều khiển từ xa độ trễ thấp dành cho tay máy Universal Robots UR3e.<br>
+                Trải nghiệm vận hành Robot trong không gian Thực tế ảo thông qua WebXR.
+            </p>
+            
+            <div class="hero-actions">
+                <button id="btn-enter-vr" class="hero-btn-primary" style="display: none;">
+                    START IMMERSIVE VR
+                </button>
+                <button id="btn-preview-ui" class="hero-btn-secondary">
+                    PREVIEW UI (PC)
+                </button>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="launcher-footer">
+            Powered by cuRobo & WebXR
+        </div>
+    </div>
+    
+    <canvas id="webgl-canvas" style="display: none;"></canvas>
 
-    <script>
-        document.getElementById('host-ip').innerText = window.location.hostname;
-        const statusDiv = document.getElementById('status');
-        const btnEnterVR = document.getElementById('btn-enter-vr');
+    <!-- DOM OVERLAY HUD -->
+    <div id="vr-overlay">
+        <div id="cockpit-panel">
+            <!-- Header -->
+            <div class="cockpit-header">
+                <div class="header-left">
+                    <span class="title">UR3e VR Teleop</span>
+                </div>
+                <div class="header-center">
+                    <span>PROGRAM &lt;vr_teleop&gt;</span>
+                </div>
+                <div class="header-right">
+                    <button id="btn-exit-vr" class="btn-top-menu">≡ Thoát VR</button>
+                </div>
+            </div>
+            
+            <!-- Body -->
+            <div class="cockpit-body">
+                <!-- Sidebar -->
+                <div class="sidebar">
+                    <!-- Card 1: System Status -->
+                    <div class="status-card">
+                        <div class="card-title">HỆ THỐNG</div>
+                        <div class="card-row">
+                            <span>Mạng:</span>
+                            <span id="val-net-ping" class="badge green">Tốt (15ms)</span>
+                        </div>
+                        <div class="card-row">
+                            <span>Singularity:</span>
+                            <span id="val-singularity" class="badge blue">Theo dõi</span>
+                        </div>
+                    </div>
 
-        let ws = null;
-        let xrSession = null;
-        let xrRefSpace = null;
+                    <!-- Card 2: Input Controller -->
+                    <div class="status-card">
+                        <div class="card-title">TAY CẦM VR</div>
+                        <div class="card-row">
+                            <span>Nguồn:</span>
+                            <span id="val-source" class="val-text">Đang chờ...</span>
+                        </div>
+                        <div class="card-row">
+                            <span>Clutch (Cò):</span>
+                            <span id="val-trigger" class="badge gray">Nhả</span>
+                        </div>
+                        <div class="card-row">
+                            <span>Gripper (Grip):</span>
+                            <span id="val-grip" class="badge gray">Nhả</span>
+                        </div>
+                    </div>
 
-        function connectWebSocket() {
-            const wsUrl = `wss://${window.location.hostname}:8444`;
-            ws = new WebSocket(wsUrl);
+                    <!-- Card 3: Teleop Mode -->
+                    <div class="status-card">
+                        <div class="card-title">CHẾ ĐỘ VẬN HÀNH</div>
+                        <div class="card-row">
+                            <span>Khớp nối:</span>
+                            <span class="val-text">IK Solver</span>
+                        </div>
+                        <div class="card-row">
+                            <span>Hệ Tọa độ:</span>
+                            <span class="val-text">Base Space</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Main Form (Center) -->
+                <div class="main-form">
+                    <div class="section-title">Tool Center Point</div>
+                    
+                    <div class="form-group">
+                        <label>Position</label>
+                        <div class="input-row">
+                            <span class="axis-label">X</span>
+                            <div class="fake-input"><span id="val-x">0.000</span> <span class="unit">m</span></div>
+                        </div>
+                        <div class="input-row">
+                            <span class="axis-label">Y</span>
+                            <div class="fake-input"><span id="val-y">0.000</span> <span class="unit">m</span></div>
+                        </div>
+                        <div class="input-row">
+                            <span class="axis-label">Z</span>
+                            <div class="fake-input"><span id="val-z">0.000</span> <span class="unit">m</span></div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Orientation (Quaternion)</label>
+                        <div class="input-row">
+                            <span class="axis-label">Qx</span>
+                            <div class="fake-input"><span id="val-qx">0.000</span></div>
+                        </div>
+                        <div class="input-row">
+                            <span class="axis-label">Qy</span>
+                            <div class="fake-input"><span id="val-qy">0.000</span></div>
+                        </div>
+                        <div class="input-row">
+                            <span class="axis-label">Qz</span>
+                            <div class="fake-input"><span id="val-qz">0.000</span></div>
+                        </div>
+                        <div class="input-row">
+                            <span class="axis-label">Qw</span>
+                            <div class="fake-input"><span id="val-qw">1.000</span></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Visualization (Right) -->
+                <div class="visualization">
+                    <div class="section-title">Camera Stream</div>
+                    <div id="cam-stream">
+                        [ Đang chờ luồng hình ảnh... ]
+                    </div>
+                    
+                    <div class="section-title" style="margin-top: 15px;">Viser 3D (Robot Status)</div>
+                    <div id="viser-view">
+                        <!-- Nhúng Viser Web UI -->
+                        <iframe id="viser-iframe" src="" width="100%" height="100%" frameborder="0"></iframe>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="cockpit-footer">
+                <div class="footer-left">
+                    <div class="status-indicator running"></div>
+                    <span class="status-text">Running</span>
+                </div>
+                <div class="footer-center">
+                    <div class="speed-slider-container">
+                        <div class="speed-slider-track">
+                            <div class="speed-slider-fill"></div>
+                            <div class="speed-slider-thumb"></div>
+                        </div>
+                        <span class="speed-text">Speed 100%</span>
+                    </div>
+                </div>
+                <div class="footer-right">
+                    <button id="btn-estop">⏹ E-STOP</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
-            ws.onopen = () => {
-                statusDiv.innerText = "WebSocket Connected! Checking WebXR...";
-                checkWebXR();
-            };
-
-            ws.onerror = (err) => {
-                statusDiv.innerText = "WebSocket Error. Make sure WSS server is running on port 8444.";
-                console.error("WS Error", err);
-            };
-
-            ws.onclose = () => {
-                statusDiv.innerText = "WebSocket Disconnected. Reconnecting in 2s...";
-                setTimeout(connectWebSocket, 2000);
-            };
-        }
-
-        function checkWebXR() {
-            if (navigator.xr) {
-                navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
-                    if (supported) {
-                        btnEnterVR.style.display = 'inline-block';
-                        statusDiv.innerText = "WebXR Ready. Press Enter VR.";
-                    } else {
-                        statusDiv.innerText = "immersive-vr not supported on this browser.";
-                    }
-                });
-            } else {
-                statusDiv.innerText = "WebXR not available (navigator.xr is undefined). Are you on HTTPS?";
-            }
-        }
-
-        btnEnterVR.addEventListener('click', () => {
-            if (!xrSession) {
-                navigator.xr.requestSession('immersive-vr', {
-                    optionalFeatures: ['local-floor', 'bounded-floor']
-                }).then(onSessionStarted);
-            }
-        });
-
-        function onSessionStarted(session) {
-            xrSession = session;
-            btnEnterVR.style.display = 'none';
-            statusDiv.innerText = "In VR Session";
-
-            session.addEventListener('end', onSessionEnded);
-
-            session.requestReferenceSpace('local').then((refSpace) => {
-                xrRefSpace = refSpace;
-                session.requestAnimationFrame(onXRFrame);
-            });
-        }
-
-        function onSessionEnded(event) {
-            xrSession = null;
-            btnEnterVR.style.display = 'inline-block';
-            statusDiv.innerText = "VR Session Ended.";
-        }
-
-        function onXRFrame(time, frame) {
-            let session = frame.session;
-            session.requestAnimationFrame(onXRFrame);
-
-            if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
-            let sentData = false;
-
-            for (let source of session.inputSources) {
-                if (source.handedness === 'right' && source.gripSpace) {
-                    let pose = frame.getPose(source.gripSpace, xrRefSpace);
-                    if (pose && source.gamepad) {
-                        // Quest 3S controllers:
-                        // buttons[0] = Index Trigger
-                        // buttons[1] = Hand Trigger (Grip)
-                        let triggerPressed = source.gamepad.buttons[0] && source.gamepad.buttons[0].pressed;
-                        let gripPressed = source.gamepad.buttons[1] && source.gamepad.buttons[1].pressed;
-
-                        let pos = pose.transform.position;
-                        let quat = pose.transform.orientation;
-
-                        let payload = {
-                            t: Date.now() / 1000.0,
-                            hand: "right",
-                            pos: [pos.x, pos.y, pos.z],
-                            quat: [quat.w, quat.x, quat.y, quat.z], // lưu ý: w trước
-                            trigger: triggerPressed,
-                            grip: gripPressed
-                        };
-
-                        ws.send(JSON.stringify(payload));
-                        sentData = true;
-                    }
-                }
-            }
-        }
-
-        // Start
-        connectWebSocket();
-    </script>
+    <script src="main.js"></script>
 </body>
 </html>
