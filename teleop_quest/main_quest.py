@@ -131,8 +131,32 @@ def main():
     
     # Nguồn cấp tọa độ cho Controller (Đọc từ Widget)
     class WidgetPoseSource:
+        def __init__(self, alpha=0.15):
+            self.alpha = alpha
+            self._ema_pos = None
+            self._ema_quat_xyzw = None
+            
         def get_pose(self):
-            return {"pos": target_widget.position.tolist(), "quat": target_widget.wxyz.tolist()}
+            import numpy as np
+            target_pos = target_widget.position
+            target_quat_wxyz = target_widget.wxyz
+            target_quat_xyzw = np.array([target_quat_wxyz[1], target_quat_wxyz[2], target_quat_wxyz[3], target_quat_wxyz[0]])
+            
+            if self._ema_pos is None:
+                self._ema_pos = target_pos
+                self._ema_quat_xyzw = target_quat_xyzw
+            else:
+                self._ema_pos = self.alpha * target_pos + (1.0 - self.alpha) * self._ema_pos
+                
+                # Slerp/EMA cho Quaternion
+                if np.dot(self._ema_quat_xyzw, target_quat_xyzw) < 0:
+                    target_quat_xyzw = -target_quat_xyzw
+                self._ema_quat_xyzw = self.alpha * target_quat_xyzw + (1.0 - self.alpha) * self._ema_quat_xyzw
+                self._ema_quat_xyzw /= np.linalg.norm(self._ema_quat_xyzw)
+                
+            ema_quat_wxyz = [self._ema_quat_xyzw[3], self._ema_quat_xyzw[0], self._ema_quat_xyzw[1], self._ema_quat_xyzw[2]]
+            
+            return {"pos": self._ema_pos.tolist(), "quat": ema_quat_wxyz}
             
     widget_pose_source = WidgetPoseSource()
     from safety.singularity_guard.guard_core import SingularityGuard

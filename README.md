@@ -123,12 +123,11 @@ ros2 run ur_client_library start_ursim.sh -m ur3e
 ```
 
 **Bước 2: Khởi động Server VR & Giao diện Điều khiển**
-Mở Terminal 2, thiết lập PYTHONPATH và chạy file chính:
+Mở Terminal 2, di chuyển vào thư mục gốc và chạy file chính dưới dạng module:
 ```bash
 cd /home/nguyen/ur_ws/curobo_ursim
-export PYTHONPATH=/home/nguyen/ur_ws/curobo_ursim:$PYTHONPATH
 source ~/curobo/.venv/bin/activate
-python teleop_quest/main_quest.py
+python3 -m teleop_quest.main_quest
 ```
 *(Hệ thống sẽ **tự động dò tìm địa chỉ IP hiện tại của máy tính**, tự động nặn chứng chỉ SSL tương ứng và in đường link truy cập ra màn hình Terminal. Khi bạn đổi mạng Wi-Fi/Hotspot, hệ thống cũng sẽ tự động làm lại từ đầu).*
 
