@@ -86,7 +86,7 @@ class DeltaPoseSource:
         current_pos_quest = np.array(frame["pos"])
         delta_quest = current_pos_quest - self._anchor_pos_quest
         
-        # Ánh xạ hệ tọa độ và scale
+        # Ánh xạ hệ tọa độ và scale (World-centric)
         delta_robot = self.R_q2r @ delta_quest * self.scale
         
         # Safety clamp delta
@@ -138,6 +138,7 @@ class DeltaPoseSource:
                 target_quat_xyzw = -target_quat_xyzw
             
             self._ema_quat_xyzw = self.alpha * target_quat_xyzw + (1.0 - self.alpha) * self._ema_quat_xyzw
+            self._ema_quat_xyzw /= np.linalg.norm(self._ema_quat_xyzw)
             self._ema_quat_xyzw /= np.linalg.norm(self._ema_quat_xyzw)
             
         # Trả về định dạng wxyz cho cuRobo

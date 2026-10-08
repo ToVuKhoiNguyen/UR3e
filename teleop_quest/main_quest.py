@@ -243,7 +243,7 @@ def main():
         ui_status.value = "Đang quy hoạch về Home..."
         q_start = JointState.from_position(torch.tensor([ctrl.joints()], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
         # Sửa q_home xoay base 90 độ (1.5708) để tránh kẹt vào bức tường ở X=0.25
-        q_home = JointState.from_position(torch.tensor([[1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
+        q_home = JointState.from_position(torch.tensor([[1.5708, -1.5708, 1.5708, -1.5708, -1.5708, -1.5708]], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
         
         result = mp.plan_cspace(q_home, current_state=q_start)
         if result is not None and result.success.any():
@@ -290,8 +290,8 @@ def main():
     if mp is not None:
         print("[Hệ thống] Tự động quy hoạch về Home lúc khởi động...")
         q_start = JointState.from_position(torch.tensor([START_JOINTS], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
-        # Sửa q_home xoay base 90 độ để tránh kẹt tường
-        q_home = JointState.from_position(torch.tensor([[1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
+        # Sửa q_home xoay base 90 độ để tránh kẹt tường, và xoay cổ tay (wrist 3) -90 độ để trục X (Đỏ) chỉa thẳng tới trước
+        q_home = JointState.from_position(torch.tensor([[1.5708, -1.5708, 1.5708, -1.5708, -1.5708, -1.5708]], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
         res = mp.plan_cspace(q_home, current_state=q_start)
         if res is not None and res.success.any():
             if hasattr(res, 'get_interpolated_plan'):
