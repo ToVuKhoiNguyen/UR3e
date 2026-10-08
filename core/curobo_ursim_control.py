@@ -127,10 +127,19 @@ def setup_ursim() -> bool:
         return r
 
     mode = _cmd("robotmode", 0.3)
-    print(f"[URSim] Robot mode: {mode}")
+    safety = _cmd("safetystatus", 0.3)
+    print(f"[URSim] Robot mode: {mode}, Safety: {safety}")
+
+    if "PROTECTIVE_STOP" in safety or "VIOLATION" in safety or "FAULT" in safety:
+        print("[URSim] Unlocking protective stop...")
+        _cmd("unlock protective stop")
+        _cmd("close safety popup")
+        time.sleep(2.0)
+        mode = _cmd("robotmode", 0.3)
 
     if "POWER_OFF" in mode or "IDLE" in mode:
-        print("[URSim] Releasing brakes...")
+        print("[URSim] Powering on and releasing brakes...")
+        _cmd("power on", w=2.0)
         _cmd("brake release", w=5.0)
         mode = _cmd("robotmode", 0.5)
         print(f"[URSim] Mode after: {mode}")

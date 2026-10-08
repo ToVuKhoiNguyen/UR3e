@@ -93,6 +93,18 @@ class CuRoboIKSolver:
         except Exception:
             return {"q": None, "latency_ms": (time.perf_counter() - t0) * 1000, "solver": "curobo"}
 
+    def fk(self, q: list) -> dict:
+        import torch
+        from curobo.types import JointState
+        js = torch.tensor([q], device="cuda", dtype=torch.float32)
+        js_obj = JointState.from_position(js, joint_names=self._ik.solver.kinematics.joint_names)
+        kin_state = self._ik.solver.kinematics.compute_kinematics(js_obj)
+        pose = kin_state.tool_poses
+        return {
+            "pos": pose.position.squeeze().cpu().tolist(),
+            "quat": pose.quaternion.squeeze().cpu().tolist()  # [w, x, y, z]
+        }
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MODULE 3: SafetyGate
@@ -137,7 +149,7 @@ class SafetyGate:
 class ServoJExecutor:
     ROBOT_IP = "127.0.0.1"
 
-    def __init__(self, dt=0.05, lookahead_time=0.04, gain=1000):
+    def __init__(self, dt=0.05, lookahead_time=0.1, gain=500):
         self._dt = dt
         self._lookahead = lookahead_time
         self._gain = gain
@@ -155,7 +167,8 @@ class ServoJExecutor:
         """Dừng servoJ và ngắt kết nối. Gọi 1 lần khi tắt Teleop."""
         if self._ctrl:
             try:
-                self._ctrl.servoStop()
+                # Dùng stopJ thay cho servoStop (stopl) để tránh lỗi Singularity (stopl unable to generate valid setpoint)
+                self._ctrl.stopJ(2.0)
                 self._ctrl.stopScript()
                 self._ctrl.disconnect()
             except Exception:

@@ -78,6 +78,13 @@ def main():
     print("[Hệ thống] Đang kết nối CuRobo và URSim...")
     scene_file = "/home/nguyen/ur_ws/curobo_ursim/assets/obstacle_scene.yml"
     ctrl = CuRoboURSim(scene_file=scene_file)
+    import numpy as np
+    import time
+    for _ in range(10):
+        if np.linalg.norm(ctrl.joints()) > 0.01:
+            break
+        time.sleep(0.1)
+    START_JOINTS = ctrl.joints()
     config = load_config()
     logger = DataLogger(config)
 
@@ -92,6 +99,12 @@ def main():
         add_control_frames=False,
     )
     server = viz._server
+    
+    # Đồng bộ Viser với trạng thái thực tế của URSim
+    from curobo.types import JointState
+    import torch
+    js_init = JointState.from_position(torch.tensor([START_JOINTS], device="cuda", dtype=torch.float32), joint_names=['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint'])
+    viz.set_joint_state(js_init)
     
     # 3.5 Setup Teleoperation (Sử dụng lại chuẩn logic từ teleoperation.py)
     from teleop.teleoperation import TeleoperationController, PyRokiIKSolver, CuRoboIKSolver, SafetyGate, ServoJExecutor
@@ -171,6 +184,15 @@ def main():
         safety_gate=SafetyGate(guard=guard),
         executor=executor
     )
+    
+    # Ép Widget bám sát tuyệt đối vào đầu robot (bỏ qua sai lệch Calibration của URSim thật)
+    fk_init = teleop._curobo.fk(START_JOINTS)
+    target_widget.position = fk_init["pos"]
+    target_widget.wxyz = fk_init["quat"]
+    
+    # Reset EMA filter
+    widget_pose_source._ema_pos = None
+    widget_pose_source._ema_quat_xyzw = None
 
     # 4. Watchdog
     watchdog = TimeoutWatchdog(quest_server, executor)
@@ -188,10 +210,10 @@ def main():
         mp = MotionPlanner(mp_cfg)
     
     with server.gui.add_folder("VR Teleoperation"):
-        cb_teleop = server.gui.add_checkbox("Bật VR Teleop", initial_value=False)
-        cb_record = server.gui.add_checkbox("🔴 Record AI Data", initial_value=False)
-        sld_speed = server.gui.add_slider("Tốc độ (Scale)", min=0.1, max=2.0, step=0.1, initial_value=1.0)
-        btn_home = server.gui.add_button("🏠 Reset to Home")
+        cb_teleop = server.gui.add_checkbox("Bat VR Teleop", initial_value=False)
+        cb_record = server.gui.add_checkbox("Record AI Data", initial_value=False)
+        sld_speed = server.gui.add_slider("Toc do (Scale)", min=0.1, max=2.0, step=0.1, initial_value=1.0)
+        btn_home = server.gui.add_button("Reset to Home")
         ui_status = server.gui.add_text("VR Status", initial_value="Chờ...", disabled=True)
         ui_conn = server.gui.add_text("Quest Connected", initial_value="No", disabled=True)
         
@@ -220,14 +242,18 @@ def main():
         print("[Hệ thống] Đang tính toán đường về Home...")
         ui_status.value = "Đang quy hoạch về Home..."
         q_start = JointState.from_position(torch.tensor([ctrl.joints()], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
-        # UR3e Home pose an toàn
-        q_home = JointState.from_position(torch.tensor([[0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
+        # Sửa q_home xoay base 90 độ (1.5708) để tránh kẹt vào bức tường ở X=0.25
+        q_home = JointState.from_position(torch.tensor([[1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
         
-        result = mp.plan_configuration(q_start, q_home)
-        if result is not None and result.success.item():
-            traj = result.interpolated_plan.squeeze().cpu().tolist()
+        result = mp.plan_cspace(q_home, current_state=q_start)
+        if result is not None and result.success.any():
+            if hasattr(result, 'get_interpolated_plan'):
+                traj = result.get_interpolated_plan().position.squeeze().cpu().tolist()
+            else:
+                traj = result.solution.position.squeeze().cpu().tolist() if hasattr(result.solution, 'position') else result.solution.squeeze().cpu().tolist()
             ui_status.value = "Đang chạy về Home an toàn..."
             executor.connect()
+            time.sleep(1.0) # Đợi script RTDE khởi động trên robot
             for q in traj:
                 executor._ctrl.servoJ(q, 0.0, 0.0, POLL_SLEEP, 0.1, 300)
                 
@@ -239,6 +265,13 @@ def main():
             executor.disconnect()
             ui_status.value = "Đã về Home an toàn!"
             print("[Hệ thống] Đã về Home an toàn.")
+            
+            # Đồng bộ Widget với vị trí mới (bằng FK)
+            fk_res = teleop._curobo.fk(traj[-1])
+            target_widget.position = fk_res["pos"]
+            target_widget.wxyz = fk_res["quat"]
+            widget_pose_source._ema_pos = None
+            widget_pose_source._ema_quat_xyzw = None
         else:
             ui_status.value = "Lỗi: Không tìm được đường về Home!"
             print("[Lỗi] Không tìm được đường về Home an toàn.")
@@ -253,14 +286,45 @@ def main():
         sys.exit(0)
     signal.signal(signal.SIGINT, handle_sigint)
 
+    # ==== TỰ ĐỘNG CHẠY VỀ HOME LÚC KHỞI ĐỘNG ====
+    if mp is not None:
+        print("[Hệ thống] Tự động quy hoạch về Home lúc khởi động...")
+        q_start = JointState.from_position(torch.tensor([START_JOINTS], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
+        # Sửa q_home xoay base 90 độ để tránh kẹt tường
+        q_home = JointState.from_position(torch.tensor([[1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
+        res = mp.plan_cspace(q_home, current_state=q_start)
+        if res is not None and res.success.any():
+            if hasattr(res, 'get_interpolated_plan'):
+                traj = res.get_interpolated_plan().position.squeeze().cpu().tolist()
+            else:
+                traj = res.solution.position.squeeze().cpu().tolist() if hasattr(res.solution, 'position') else res.solution.squeeze().cpu().tolist()
+            executor.connect()
+            time.sleep(1.0) # Đợi script RTDE khởi động trên robot
+            for q in traj:
+                executor._ctrl.servoJ(q, 0.0, 0.0, POLL_SLEEP, 0.1, 300)
+                js = JointState.from_position(torch.tensor([q], device="cuda", dtype=torch.float32), joint_names=mp.joint_names)
+                viz.set_joint_state(js)
+                time.sleep(POLL_SLEEP)
+            executor.disconnect()
+            print("[Hệ thống] Đã khởi động an toàn tại Home.")
+            
+            # Cập nhật lại Widget cho khớp với Home bằng Forward Kinematics (bỏ qua độ trễ RTDE)
+            fk_res = teleop._curobo.fk(traj[-1])
+            target_widget.position = fk_res["pos"]
+            target_widget.wxyz = fk_res["quat"]
+            
+            # Reset luôn EMA filter
+            widget_pose_source._ema_pos = None
+            widget_pose_source._ema_quat_xyzw = None
+
     # Vòng lặp chính (20Hz)
     print("\n" + "="*30)
     print(f"ĐỊA CHỈ IP HIỆN TẠI CỦA MÁY TÍNH LÀ: {local_ip}")
     print("="*30)
     
     print("\n[LIÊN KẾT NHANH DÀNH CHO MÁY TÍNH]")
-    print(f"👉 Viser Dashboard (Giao diện điều khiển): http://localhost:8080")
-    print(f"👉 URSim Web (Màn hình Teach Pendant): http://192.168.56.101:6080/vnc.html")
+    print(f"-> Viser Dashboard (Giao diện điều khiển): http://localhost:8080")
+    print(f"-> URSim Web (Màn hình Teach Pendant): http://192.168.56.101:6080/vnc.html")
     
     print("\n[LIÊN KẾT DÀNH CHO KÍNH VR QUEST 3S]")
     print(f"1. Thông chốt SSL (Duyệt mạng): https://{local_ip}:{quest_server.ws_port}")
