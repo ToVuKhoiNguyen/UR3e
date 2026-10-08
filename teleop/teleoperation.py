@@ -167,8 +167,7 @@ class ServoJExecutor:
         """Dừng servoJ và ngắt kết nối. Gọi 1 lần khi tắt Teleop."""
         if self._ctrl:
             try:
-                # Dùng stopJ thay cho servoStop (stopl) để tránh lỗi Singularity (stopl unable to generate valid setpoint)
-                self._ctrl.stopJ(2.0)
+                self._ctrl.servoStop()
                 self._ctrl.stopScript()
                 self._ctrl.disconnect()
             except Exception:
