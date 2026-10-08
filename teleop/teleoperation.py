@@ -239,6 +239,7 @@ class TeleoperationController:
         if value and not self._enabled:
             self._exec.connect()
             self._status = "⏳ Chờ tín hiệu tay cầm..."
+            self._last_valid_q = None
         elif not value and self._enabled:
             self._exec.disconnect()
             self._status = "⏸ Teleop tắt"
