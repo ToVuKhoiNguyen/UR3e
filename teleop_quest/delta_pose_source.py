@@ -94,7 +94,7 @@ class DeltaPoseSource:
             return None # Bỏ qua frame đầu tiên để tránh giật
 
         # ===============================
-        # TÍNH TOÁN DELTA TỊNH TIẾN (TOOL-CENTRIC)
+        # TÍNH TOÁN DELTA TỊNH TIẾN (WORLD-CENTRIC)
         # ===============================
         diag_msg = "STANDING STILL"
         delta_mag = 0.0
@@ -103,58 +103,55 @@ class DeltaPoseSource:
         R_q_anchor = R.from_quat(self._anchor_quat_quest_xyzw)
         R_r_anchor = R.from_quat(self._anchor_quat_robot_xyzw)
         
-        # Meta Quest GripSpace: +X(Phải), -Y(Tiến), -Z(Lên)
-        # UR TCP Local: +Z(Tiến), -X(Lên), +Y(Phải)
-        M_local_q2tcp = np.array([
-            [ 0,  0,  1], # TCP X (Lên/Xuống) = Quest Z
-            [ 1,  0,  0], # TCP Y (Trái/Phải) = Quest X
-            [ 0, -1,  0]  # TCP Z (Tiến/Lùi)  = - Quest Y
-        ])
-        
         if is_translating:
             current_pos_quest = np.array(frame["pos"])
+            # delta_q_world là sự thay đổi vị trí tay người dùng trong KHÔNG GIAN THỰC
+            # (Trái/Phải, Lên/Xuống, Tiến/Lùi) so với lúc vừa bấm cò
             delta_q_world = current_pos_quest - self._anchor_pos_quest
             
-            # 1. Chuyển delta tịnh tiến về Local của tay cầm lúc bấm cò
-            delta_q_local = R_q_anchor.inv().apply(delta_q_world)
+            # --- BỘ LỌC CHỐNG NHIỄU & CHẨN ĐOÁN ---
+            delta_mag = np.linalg.norm(delta_q_world)
             
-            # --- BỘ LỌC CHỐNG NHIỄU & CHẨN ĐOÁN (DIAGNOSTICS) ---
-            delta_mag = np.linalg.norm(delta_q_local)
-            
-            if delta_mag < 0.015:  # Deadband tĩnh: Tăng lên 1.5cm để triệt tiêu hoàn toàn nhiễu rung tay
-                delta_q_local = np.zeros(3)
+            if delta_mag < 0.015:  # Deadband tĩnh 1.5cm
+                delta_q_world = np.zeros(3)
             else:
-                # SOFT DEADBAND: Khử độ nhảy vọt (Jerk) khi vượt qua ngưỡng 1.5cm.
-                delta_q_local = delta_q_local * ((delta_mag - 0.015) / delta_mag)
+                # SOFT DEADBAND: Khử độ nhảy vọt khi vượt ngưỡng
+                delta_q_world = delta_q_world * ((delta_mag - 0.015) / delta_mag)
                 
-                abs_delta = np.abs(delta_q_local)
+                abs_delta = np.abs(delta_q_world)
                 max_axis = np.argmax(abs_delta)
                 
-                # Tỷ lệ snapping 60%: Khóa trục gắt hơn để chặn các hướng dịch chuyển sai ngoài ý muốn
+                # Tỷ lệ snapping 60%: Hỗ trợ người dùng kéo đường thẳng tắp theo 1 trục
                 for i in range(3):
                     if i != max_axis and abs_delta[i] < 0.6 * abs_delta[max_axis]:
-                        delta_q_local[i] = 0.0
+                        delta_q_world[i] = 0.0
                         
-                # Chẩn đoán (Quest Local theo GripSpace thực tế: X=Trái/Phải, Y=Lùi/Tiến, Z=Xuống/Lên)
-                if max_axis == 2:
-                    direction_word = "LÊN TRÊN" if delta_q_local[max_axis] < 0 else "XUỐNG DƯỚI"
-                elif max_axis == 1:
-                    direction_word = "TIẾN (Đâm thẳng)" if delta_q_local[max_axis] < 0 else "LÙI (Về phía sếp)"
+                # Chẩn đoán (Không gian WebXR: +X Phải, +Y Lên, +Z Lùi về phía người dùng)
+                if max_axis == 1:
+                    direction_word = "LÊN TRÊN" if delta_q_world[max_axis] > 0 else "XUỐNG DƯỚI"
+                elif max_axis == 2:
+                    direction_word = "LÙI (Về phía sếp)" if delta_q_world[max_axis] > 0 else "TIẾN (Đâm thẳng)"
                 else:
-                    direction_word = "SANG PHẢI" if delta_q_local[max_axis] > 0 else "SANG TRÁI"
+                    direction_word = "SANG PHẢI" if delta_q_world[max_axis] > 0 else "SANG TRÁI"
                     
                 diag_msg = f"{direction_word}"
                         
-            # 2. Ánh xạ Local Quest sang Local TCP
-            delta_tcp_local = M_local_q2tcp.dot(delta_q_local)
+            # --- WORLD-CENTRIC MAPPING ---
+            # Ánh xạ trực tiếp Không gian tay người 1:1 sang Không gian Robot
+            # WebXR World: X(Phải), Y(Lên), Z(Lùi về phía sếp)
+            # Robot World: X(Tiến xa), Y(Trái), Z(Lên)
+            delta_robot_world = np.array([
+                -delta_q_world[2], # Robot X (Tiến) = Quest -Z
+                -delta_q_world[0], # Robot Y (Trái) = Quest -X
+                 delta_q_world[1]  # Robot Z (Lên)  = Quest Y
+            ])
+            
+            delta_robot_world = delta_robot_world * self.scale
+            delta_robot_world = np.clip(delta_robot_world, -self.max_delta_m, self.max_delta_m)
         else:
-            delta_tcp_local = np.zeros(3)
+            delta_robot_world = np.zeros(3)
             diag_msg = "CHỈ XOAY (KHÓA TỊNH TIẾN)"
             
-        # 3. Chuyển Delta Local TCP về Robot World Space
-        delta_robot_world = R_r_anchor.apply(delta_tcp_local) * self.scale
-        delta_robot_world = np.clip(delta_robot_world, -self.max_delta_m, self.max_delta_m)
-        
         target_pos = self._anchor_tcp[:3] + delta_robot_world
         
         # Workspace safety clamp (Hardcoded UR3e safe zone)

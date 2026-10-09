@@ -151,11 +151,12 @@ def main():
         return [pos[0], pos[1], pos[2], axis[0]*angle, axis[1]*angle, axis[2]*angle]
         
     # Nguồn cấp tọa độ từ Kính VR, mỏ neo vào TỌA ĐỘ THỰC TẾ của robot (thông qua CuRobo FK)
-    pose_source = DeltaPoseSource(quest_server, ctrl, scale=0.5, anchor_reference_func=get_robot_fk_as_ur, alpha=0.05)
+    # Tăng scale=0.7 (nhanh hơn), alpha=0.1 (nhạy hơn)
+    pose_source = DeltaPoseSource(quest_server, ctrl, scale=0.7, anchor_reference_func=get_robot_fk_as_ur, alpha=0.1)
     
     # Nguồn cấp tọa độ cho Controller (Đọc từ Widget)
     class WidgetPoseSource:
-        def __init__(self, alpha=0.06):
+        def __init__(self, alpha=0.12):
             self.alpha = alpha
             self._ema_pos = None
             self._ema_quat_xyzw = None
