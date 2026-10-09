@@ -22,7 +22,8 @@
         let glContext = null;
 
         function connectWebSocket() {
-            const wsUrl = `wss://${window.location.hostname}:8444`;
+            let host = window.location.hostname || '127.0.0.1';
+            const wsUrl = `wss://${host}:8444`;
             ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
@@ -85,6 +86,24 @@
                 vrOverlay.style.display = 'none';
                 document.getElementById('launcher-screen').style.display = 'flex';
                 document.body.style.backgroundColor = '#f0f0f0';
+            }
+        });
+
+        // Khóa màn hình để xuyên thấu tia laser, giúp bóp cò điều khiển robot mà vẫn xem được UI
+        let uiLocked = false;
+        const btnToggleUI = document.getElementById('btn-toggle-ui');
+        const cockpitBody = document.querySelector('.cockpit-body');
+        
+        btnToggleUI.addEventListener('click', () => {
+            uiLocked = !uiLocked;
+            if (uiLocked) {
+                cockpitBody.style.pointerEvents = 'none';
+                btnToggleUI.innerHTML = 'Unlock UI (Edit Mode)';
+                btnToggleUI.style.background = '#4CAF50';
+            } else {
+                cockpitBody.style.pointerEvents = 'auto';
+                btnToggleUI.innerHTML = 'Lock UI (Drive Mode)';
+                btnToggleUI.style.background = '#f59e0b';
             }
         });
 
@@ -183,15 +202,15 @@
                         grip: gripPressed
                     }));
                     
-                    let handName = source.handedness === 'right' ? "Tay Phải" : (source.handedness === 'left' ? "Tay Trái" : "Unknown");
+                    let handName = source.handedness === 'right' ? "Right Hand" : (source.handedness === 'left' ? "Left Hand" : "Unknown");
                     
                     // Cập nhật dữ liệu lên URSim Layout
                     elValSource.innerText = handName;
                     
-                    elValTrigger.innerText = triggerPressed ? "BÓP" : "Nhả";
+                    elValTrigger.innerText = triggerPressed ? "Pressed" : "Released";
                     elValTrigger.className = triggerPressed ? "badge red" : "badge gray";
                     
-                    elValGrip.innerText = gripPressed ? "BÓP" : "Nhả";
+                    elValGrip.innerText = gripPressed ? "Pressed" : "Released";
                     elValGrip.className = gripPressed ? "badge red" : "badge gray";
                     
                     elValX.innerText = pos.x.toFixed(4);
@@ -227,5 +246,6 @@
         // Auto-assign the correct IP for Viser iframe based on current host
         const viserIframe = document.getElementById('viser-iframe');
         if (viserIframe) {
-            viserIframe.src = `http://${window.location.hostname}:8080`;
+            let host = window.location.hostname || '127.0.0.1';
+            viserIframe.src = `http://${host}:8080`;
         }

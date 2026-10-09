@@ -195,7 +195,14 @@ class DeltaPoseSource:
                 rotvec = R_delta_hand_local.as_rotvec()
                 R_delta_hand_local = R.from_rotvec(rotvec * scale_factor)
                 
-            # Ánh xạ vector góc xoay từ Tay cầm sang TCP
+            # Ánh xạ vector góc xoay từ Tay cầm sang TCP (Tool-Centric)
+            # Meta Quest GripSpace: +X(Phải), -Y(Tiến), -Z(Lên)
+            # UR TCP Local: +Z(Tiến), -X(Lên), +Y(Phải)
+            M_local_q2tcp = np.array([
+                [ 0,  0,  1], # TCP X (Lên/Xuống) = Quest Z
+                [ 1,  0,  0], # TCP Y (Trái/Phải) = Quest X
+                [ 0, -1,  0]  # TCP Z (Tiến/Lùi)  = - Quest Y
+            ])
             rotvec_hand = R_delta_hand_local.as_rotvec()
             rotvec_tcp = M_local_q2tcp.dot(rotvec_hand)
             R_delta_tcp_local = R.from_rotvec(rotvec_tcp)

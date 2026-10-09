@@ -17,7 +17,8 @@ Một hệ thống điều khiển tay máy công nghiệp UR3e toàn diện, k�
   - **Kẹp Vận Tốc (Rate Limiter):** Giới hạn phần mềm delta góc khớp luôn dưới 1.5 rad/s, triệt tiêu lỗi *Protective Stop* từ tủ điều khiển vật lý.
   - **Mở khóa Không gian (Full Range Unlock):** Khai thác tối đa thông số nhà sản xuất (quay $\pm 360^\circ$ cho 5 trục đầu và $\pm 720^\circ$ cho trục cổ tay 3).
 - **Vệ sĩ Chạy ngầm (Runtime Monitor & Safe Return):** Luồng song song 20Hz liên tục đo lường ma trận Jacobian. Nếu kỹ sư vô tình bẻ tay máy vào vùng lõi kỳ dị ($\sigma_{min}$ chạm ngưỡng đỏ), hệ thống sẽ lập tức giật quyền điều khiển, hãm phanh khẩn cấp và gọi module `SafeReturn` để rụt tay máy về vị trí Home an toàn.
-- **3D Web Interface:** Tích hợp bộ thư viện **Viser**, cho phép người dùng tương tác, kéo thả và giám sát robot thông qua giao diện Web trực quan (không cài cắm rườm rà).
+- **Auto-Snap & VR Haptics:** Phản hồi xúc giác (Haptic) rung tay cầm lập tức khi robot chạm vật cản, mất nội suy, hoặc kẹt kỳ dị. Đặc biệt, nếu robot bị kẹt hoặc nằm ngoài tầm với quá 2.0 giây, ngàm 3D ảo sẽ tự động giật lùi (Auto-Snap) về lại đúng vị trí vật lý hiện tại của tay máy thực.
+- **3D Web Interface (Modern Industrial):** Giao diện điều khiển Viser tinh giản theo hướng công nghiệp chuyên nghiệp, hỗ trợ nút quy hoạch về Home "một chạm" khép kín (tự động ngắt, chạy về, và tự động bật lại hệ thống Teleop).
 
 ## Kiến trúc Hệ thống (Architecture)
 
@@ -123,18 +124,19 @@ Do sử dụng chứng chỉ bảo mật tự tạo (Self-signed) cho IP LAN, b�
 4. Trải nghiệm màn hình **Welcome Screen phong cách Light/Modern công nghiệp** hiện ra (nền xám khói sang trọng). Bấm nút **START IMMERSIVE VR**.
 5. Đeo kính và cấp quyền WebXR. Xung quanh bạn sẽ chuyển sang chế độ AR nhìn xuyên thấu, đồng thời Bảng điều khiển ảo (Virtual Cockpit) sẽ hiển thị các thẻ thông số Robot Pose.
 
-**Bước 4: Cơ chế Điều khiển Thực chiến (Tool-Centric Mapping)**
+**Bước 4: Cơ chế Điều khiển Phân tách (Decoupled Controls & World-Centric)**
 - **Kích hoạt Teleop:** Trên giao diện điều khiển (PC hoặc VR), tích chọn ô **`Bat VR Teleop`**.
-- **Cơ chế Mỏ Neo (Clutch & Leash):** Để điều khiển, bạn phải **bóp giữ ĐỒNG THỜI Cò (Trigger) + Nút hông (Grip)**.
-- **Tịnh tiến & Xoay góc (Thuật toán Hóa thân - Tool-centric):** Từ bản cập nhật mới nhất, bàn tay của bạn chính là ngàm (TCP) của robot!
-  - Khi bóp cò và **đâm thẳng tay về phía trước**, robot sẽ **đâm ngàm thẳng về phía trước** (dọc theo trục mũi ngàm). Bất kể bạn đứng quay lưng hay đối diện, hướng chuyển động của tay sẽ 1:1 với hướng chuyển động của ngàm.
-  - Vặn/Lắc cổ tay sẽ trực tiếp làm xoay cụm ngàm theo nguyên lý cục bộ (Local axes).
-  - Tích hợp bộ lọc **Deadband/Axis Snapping**: Tự động triệt tiêu lực run tay văng ngang khi cố tình đẩy thẳng (độ lệch dưới 50% sẽ bị ép về 0).
+- **Cơ chế Phân tách Điều khiển:** Hệ thống chia tách rõ rệt chuyển động để triệt tiêu rung nhiễu:
+  - **Chỉ bóp Cò (Trigger):** Kích hoạt **Chỉ Tịnh Tiến**. Khóa chết trục xoay. Áp dụng hệ quy chiếu **World-Centric** (không gian thực). Đẩy tay cầm thẳng tới trước $\rightarrow$ robot đâm thẳng tới trước dọc theo trục X toàn cục, bất kể tay cầm của bạn đang bị nghiêng. Đưa tay lên trời $\rightarrow$ Robot đi thẳng lên trời.
+  - **Chỉ bóp Nút Hông (Grip):** Kích hoạt **Chỉ Xoay**. Khóa chết tịnh tiến. Áp dụng hệ quy chiếu **Tool-Centric**. Robot neo chặt tọa độ, xoay mượt mà cổ tay dọc theo các trục của chính nó (chuẩn công nghiệp).
+  - **Bóp cả 2 Nút:** Chuyển động tự do 6D (vừa đẩy vừa xoay).
+- **Côn Thông Minh (Smart Clutch):** Khi chuyển qua lại giữa các nút bấm, hệ thống tự động thả lại mỏ neo hệ quy chiếu, loại bỏ hoàn toàn các điểm giật cục (Teleportation).
+- **Snapping/Deadband:** Áp dụng Deadband tĩnh (1.5cm) và tính năng bám trục thẳng (Snapping) giúp bạn kéo những đường cắt laser mượt mà, thẳng tắp trong không trung.
 
 ## Lưu ý An toàn (Safety Warnings)
 
-Hệ thống đã được trang bị **3 lớp phanh hãm** (Scale 0.5, EMA Filter 0.05 siêu mượt, và Max Velocity Clamp) để đảm bảo độ êm ái cực cao khi chạy trên robot thật. Tuy nhiên:
+Hệ thống đã được tinh chỉnh thông số (Scale 0.7, EMA Filter 0.1 mượt mà, và Max Velocity Clamp 1.2 rad/s) để đảm bảo độ êm ái nhưng vẫn cực kỳ "bốc" khi chạy trên robot thật. Tuy nhiên:
 1. **LUÔN LUÔN** đặt tay lên nút Dừng Khẩn Cấp (E-Stop) của tủ điều khiển.
 2. Tuyệt đối không đứng trong bán kính hoạt động 1.5 mét của robot khi đang test Teleop.
-3. Cơ chế theo dõi (Tracking) được tối ưu hóa cho độ mượt mà, do đó sẽ có một độ trễ nhỏ rải đều (Elastic band effect) giữa tay cầm và robot thật.
+3. Nếu tay cầm rung mạnh (Haptics) báo hiệu lỗi vật cản hoặc kỳ dị, hãy lập tức nhả cò để ngàm 3D tự động snap về vị trí an toàn.
 

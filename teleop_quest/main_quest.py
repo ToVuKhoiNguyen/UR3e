@@ -53,7 +53,7 @@ def main():
     cert_path = os.path.join(base_dir, "certs", "cert.pem")
     key_path = os.path.join(base_dir, "certs", "key.pem")
     
-    print(f"[Hệ thống] IP hiện tại: {local_ip}")
+    print(f"IP hiện tại: {local_ip}")
     os.makedirs(os.path.join(base_dir, "certs"), exist_ok=True)
     
     ip_cache_path = os.path.join(base_dir, "certs", "ip_cache.txt")
@@ -63,7 +63,7 @@ def main():
             cached_ip = f.read().strip()
 
     if not os.path.exists(cert_path) or cached_ip != local_ip:
-        print(f"[Hệ thống] IP thay đổi (hoặc chạy lần đầu). Đang tự động tạo SSL cho IP: {local_ip}...")
+        print(f"IP thay đổi (hoặc chạy lần đầu). Đang tự động tạo SSL cho IP: {local_ip}...")
         subprocess.run(
             f"openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout {key_path} -out {cert_path} -subj '/CN={local_ip}'", 
             shell=True, stderr=subprocess.DEVNULL
@@ -75,7 +75,7 @@ def main():
     quest_server.start()
 
     # 2. Khởi động Controller, Logger & URSim
-    print("[Hệ thống] Đang kết nối CuRobo và URSim...")
+    print("Đang kết nối CuRobo và URSim...")
     scene_file = "/home/nguyen/ur_ws/curobo_ursim/assets/obstacle_scene.yml"
     ctrl = CuRoboURSim(scene_file=scene_file)
     import numpy as np
@@ -151,8 +151,8 @@ def main():
         return [pos[0], pos[1], pos[2], axis[0]*angle, axis[1]*angle, axis[2]*angle]
         
     # Nguồn cấp tọa độ từ Kính VR, mỏ neo vào TỌA ĐỘ THỰC TẾ của robot (thông qua CuRobo FK)
-    # Tăng scale=0.7 (nhanh hơn), alpha=0.1 (nhạy hơn)
-    pose_source = DeltaPoseSource(quest_server, ctrl, scale=0.7, anchor_reference_func=get_robot_fk_as_ur, alpha=0.1)
+    # Scale=1.0 (Tỷ lệ 1:1 giữa tay người và tay máy), alpha=0.1 (nhạy hơn)
+    pose_source = DeltaPoseSource(quest_server, ctrl, scale=1.0, anchor_reference_func=get_robot_fk_as_ur, alpha=0.1)
     
     # Nguồn cấp tọa độ cho Controller (Đọc từ Widget)
     class WidgetPoseSource:
@@ -210,8 +210,6 @@ def main():
     watchdog = TimeoutWatchdog(quest_server, executor)
     watchdog.start()
 
-
-
     # Thêm bàn (vật cản) vào môi trường và khởi tạo Motion Planner
     from curobo.motion_planner import MotionPlannerCfg, MotionPlanner
     scene_file = "/home/nguyen/ur_ws/curobo_ursim/assets/obstacle_scene.yml"
@@ -222,31 +220,25 @@ def main():
         mp = MotionPlanner(mp_cfg)
     
     with server.gui.add_folder("VR Teleoperation"):
-        cb_teleop = server.gui.add_checkbox("Bat VR Teleop", initial_value=False)
+        cb_teleop = server.gui.add_checkbox("VR Teleop", initial_value=False)
         cb_record = server.gui.add_checkbox("Record AI Data", initial_value=False)
-        sld_speed = server.gui.add_slider("Toc do (Scale)", min=0.1, max=2.0, step=0.1, initial_value=0.5)
-        btn_home = server.gui.add_button("Reset to Home")
-        ui_status = server.gui.add_text("VR Status", initial_value="Chờ...", disabled=True)
-        ui_conn = server.gui.add_text("Quest Connected", initial_value="No", disabled=True)
-        
-    @sld_speed.on_update
-    def _on_speed_update(_):
-        pose_source.scale = sld_speed.value
-        print(f"[Cài đặt] Đã chỉnh tốc độ Robot xuống còn {sld_speed.value}x")
+        btn_home = server.gui.add_button("Go to Home")
+        ui_status = server.gui.add_text("Status", initial_value="Waiting...", disabled=True)
+        ui_conn = server.gui.add_text("VR Connected", initial_value="No", disabled=True)
         
     @cb_record.on_update
     def _on_record_update(_):
         logger.is_recording = cb_record.value
         if cb_record.value:
-            print("[AI Logger] BẮT ĐẦU thu thập dữ liệu!")
+            print("BẮT ĐẦU thu thập dữ liệu!")
         else:
             logger.flush()
-            print("[AI Logger] ĐÃ DỪNG thu thập dữ liệu.")
+            print("ĐÃ DỪNG thu thập dữ liệu.")
         
     def _on_btn_home_click(_):
         nonlocal _last_teleop_state
         if not mp:
-            ui_status.value = "Lỗi: Không tìm thấy Motion Planner!"
+            ui_status.value = "Error: Motion Planner not found!"
             return
             
         if cb_teleop.value:
@@ -257,8 +249,8 @@ def main():
             executor.disconnect()
             time.sleep(0.5) # Đợi nhả điều khiển RTDE
             
-        print("[Hệ thống] Đang tính toán đường về Home...")
-        ui_status.value = "Đang quy hoạch về Home..."
+        print("[System] Calculating Home trajectory...")
+        ui_status.value = "Planning to Home..."
         q_start = JointState.from_position(torch.tensor([ctrl.joints()], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
         # Sửa q_home xoay base 90 độ (1.5708) để tránh kẹt vào bức tường ở X=0.25
         q_home = JointState.from_position(torch.tensor([[1.5708, -1.5708, 1.5708, -1.5708, -1.5708, -1.5708]], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
@@ -281,8 +273,8 @@ def main():
                 
                 time.sleep(POLL_SLEEP)
             executor.disconnect()
-            ui_status.value = "Đã về Home an toàn!"
-            print("[Hệ thống] Đã về Home an toàn.")
+            ui_status.value = "Safely returned to Home!"
+            print("Safely returned to Home!")
             
             # Đồng bộ Widget với vị trí mới (bằng FK)
             fk_res = teleop._curobo.fk(traj[-1])
@@ -300,7 +292,7 @@ def main():
     btn_home.on_click(_on_btn_home_click)
 
     def handle_sigint(sig, frame):
-        print("\n[Hệ thống] Đang tắt an toàn...")
+        print("[Hệ thống] Đang tắt an toàn...")
         teleop.enabled = False
         time.sleep(0.5)
         ctrl.close()
@@ -333,7 +325,7 @@ def main():
                 executor._ctrl.stopJ(2.0)
             except: pass
             ui_status.value = "EMERGENCY STOP (Từ VR)!"
-            print("\n[CẢNH BÁO] Đã nhận lệnh E-STOP từ kính VR! Đã ngắt động cơ.")
+            print("Đã nhận lệnh E-STOP từ kính VR! Đã ngắt động cơ.")
             quest_server.send_haptic(1.0, 1000) # Rung tay cầm 1 giây
             
         # Cập nhật kết nối UI
@@ -368,7 +360,19 @@ def main():
                 # Đưa teleop.step LÊN TRƯỚC để lấy status (Thành công hay IK Thất bại)
                 teleop.step(q_real)
                 current_status = teleop.get_status()
-                ui_status.value = current_status
+                status_low = current_status.lower()
+                
+                # Làm gọn và đồng bộ VR Status
+                if "thất bại" in status_low or "fail" in status_low:
+                    ui_status.value = "IK Error"
+                elif "ngoai tam voi" in status_low or "ngoài tầm với" in status_low or "vượt giới hạn" in status_low or "out of reach" in status_low:
+                    ui_status.value = "Out of Reach"
+                elif "singularity" in status_low or "kì dị" in status_low:
+                    ui_status.value = "Singularity"
+                elif "sigma=" in status_low or "curobo" in status_low:
+                    ui_status.value = "Tracking"
+                else:
+                    ui_status.value = current_status.split("|")[0].strip()
                 
                 # 2. Đọc tín hiệu từ kính VR
                 vr_pose = pose_source.get_pose()
@@ -386,15 +390,6 @@ def main():
                     if is_out_of_reach:
                         pose_source.out_of_reach_time += POLL_SLEEP
                         
-                        # Debug in ra mỗi 0.5s để theo dõi
-                        if hasattr(pose_source, "debug_tick"):
-                            pose_source.debug_tick += 1
-                        else:
-                            pose_source.debug_tick = 0
-                            
-                        if pose_source.debug_tick % 10 == 0:
-                            dist = np.linalg.norm(np.array(fk_res["pos"]) - np.array(target_widget.position))
-                            print(f"[Debug] Lỗi IK (Cách {dist*100:.1f}cm), Thời gian kẹt: {pose_source.out_of_reach_time:.1f}s")
                     else:
                         pose_source.out_of_reach_time = 0.0
                         
