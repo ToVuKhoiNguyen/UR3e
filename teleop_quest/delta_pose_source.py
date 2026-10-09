@@ -12,6 +12,9 @@ class DeltaPoseSource:
         self.max_delta_m = max_delta_m
         self.anchor_reference_func = anchor_reference_func
         self.alpha = alpha
+        
+        self._last_diag_msg = ""
+        self._last_diag_time = 0
 
         # Ma trận xoay từ Quest local space sang UR3e base_link
         # Giả định sếp đứng đối diện mặt trước của robot:
@@ -95,18 +98,41 @@ class DeltaPoseSource:
         # 1. Chuyển delta tịnh tiến về Local của tay cầm lúc bấm cò
         delta_q_local = R_q_anchor.inv().apply(delta_q_world)
         
-        # --- BỘ LỌC CHỐNG LỆCH TRỤC (LOCAL AXIS SNAPPING) ---
+        # --- BỘ LỌC CHỐNG NHIỄU & CHẨN ĐOÁN (DIAGNOSTICS) ---
         delta_mag = np.linalg.norm(delta_q_local)
-        if delta_mag < 0.01:  # Deadband tĩnh: 1cm
+        diag_msg = "STANDING STILL"
+        
+        if delta_mag < 0.015:  # Deadband tĩnh: Tăng lên 1.5cm để triệt tiêu hoàn toàn nhiễu rung tay
             delta_q_local = np.zeros(3)
         else:
             abs_delta = np.abs(delta_q_local)
             max_axis = np.argmax(abs_delta)
             
-            # Tỷ lệ snapping 50%: Hỗ trợ đẩy thẳng tắp theo 1 trục
+            # Tỷ lệ snapping 60%: Khóa trục gắt hơn để chặn các hướng dịch chuyển sai ngoài ý muốn
             for i in range(3):
-                if i != max_axis and abs_delta[i] < 0.5 * abs_delta[max_axis]:
+                if i != max_axis and abs_delta[i] < 0.6 * abs_delta[max_axis]:
                     delta_q_local[i] = 0.0
+                    
+            # Chẩn đoán (Quest Local: 0=Phải/Trái, 1=Lên/Xuống, 2=Lùi/Tiến)
+            axis_names = ["Ngang (TRÁI/PHẢI)", "Dọc (LÊN/XUỐNG)", "Trục dọc (TIẾN/LÙI)"]
+            direction = "+" if delta_q_local[max_axis] > 0 else "-"
+            # Z âm là tiến tới trước
+            if max_axis == 2:
+                direction_word = "LÙI (Về phía sếp)" if delta_q_local[max_axis] > 0 else "TIẾN (Đâm thẳng)"
+            elif max_axis == 1:
+                direction_word = "LÊN TRÊN" if delta_q_local[max_axis] > 0 else "XUỐNG DƯỚI"
+            else:
+                direction_word = "SANG PHẢI" if delta_q_local[max_axis] > 0 else "SANG TRÁI"
+                
+            diag_msg = f"{direction_word}"
+
+        import time
+        current_time = time.time()
+        if diag_msg != self._last_diag_msg or (current_time - self._last_diag_time > 1.5):
+            if diag_msg != "STANDING STILL":
+                print(f"[Chẩn đoán VR] Hướng vung tay: {diag_msg} (Lực: {delta_mag*100:.1f}cm)")
+            self._last_diag_msg = diag_msg
+            self._last_diag_time = current_time
                     
         # 2. Ánh xạ Local Quest sang Local TCP
         # Quest Local: +X(Phải), +Y(Lên), -Z(Tiến)
