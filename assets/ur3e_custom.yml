@@ -49,6 +49,14 @@ robot_cfg:
       tool0:
         - center: [0, 0, 0.05]
           radius: 0.04
+        # --- BỘ KHUNG VA CHẠM CHO CAMERA GẮN TRÊN END-EFFECTOR ---
+        # Giả lập Camera (ví dụ RealSense) gắn lệch trục Y và trồi lên trên trục Z
+        - center: [0.0, 0.06, 0.05]
+          radius: 0.035
+        - center: [0.04, 0.06, 0.05]
+          radius: 0.035
+        - center: [-0.04, 0.06, 0.05]
+          radius: 0.035
     cspace:
       cspace_distance_weight:
       - 1.0

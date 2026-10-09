@@ -125,13 +125,15 @@ Do sử dụng chứng chỉ bảo mật tự tạo (Self-signed) cho IP LAN, b�
 5. Đeo kính và cấp quyền WebXR. Xung quanh bạn sẽ chuyển sang chế độ AR nhìn xuyên thấu, đồng thời Bảng điều khiển ảo (Virtual Cockpit) sẽ hiển thị các thẻ thông số Robot Pose.
 
 **Bước 4: Cơ chế Điều khiển Phân tách (Decoupled Controls & World-Centric)**
-- **Kích hoạt Teleop:** Trên giao diện điều khiển (PC hoặc VR), tích chọn ô **`Bat VR Teleop`**.
+- **Kích hoạt Teleop:** Trên bảng điều khiển Viser, tích chọn ô **`VR Teleop`**.
+- **Chế độ Lái Tỷ lệ 1:1 (World-Centric 1:1):** Thanh trượt tốc độ đã được lược bỏ. Mọi chuyển động của tay người dùng được map chính xác 1:1 với tay máy trong hệ quy chiếu không gian thực (World-Centric). Đẩy tay cầm lên 10cm $\rightarrow$ Robot di chuyển đúng 10cm về phía trước dọc trục X, độc lập với góc nghiêng của tay cầm.
 - **Cơ chế Phân tách Điều khiển:** Hệ thống chia tách rõ rệt chuyển động để triệt tiêu rung nhiễu:
-  - **Chỉ bóp Cò (Trigger):** Kích hoạt **Chỉ Tịnh Tiến**. Khóa chết trục xoay. Áp dụng hệ quy chiếu **World-Centric** (không gian thực). Đẩy tay cầm thẳng tới trước $\rightarrow$ robot đâm thẳng tới trước dọc theo trục X toàn cục, bất kể tay cầm của bạn đang bị nghiêng. Đưa tay lên trời $\rightarrow$ Robot đi thẳng lên trời.
-  - **Chỉ bóp Nút Hông (Grip):** Kích hoạt **Chỉ Xoay**. Khóa chết tịnh tiến. Áp dụng hệ quy chiếu **Tool-Centric**. Robot neo chặt tọa độ, xoay mượt mà cổ tay dọc theo các trục của chính nó (chuẩn công nghiệp).
+  - **Chỉ bóp Cò (Trigger):** Kích hoạt **Chỉ Tịnh Tiến**. Khóa chết trục xoay. 
+  - **Chỉ bóp Nút Hông (Grip):** Kích hoạt **Chỉ Xoay**. Khóa chết tịnh tiến. Áp dụng hệ quy chiếu **Tool-Centric** (chuẩn công nghiệp).
   - **Bóp cả 2 Nút:** Chuyển động tự do 6D (vừa đẩy vừa xoay).
-- **Côn Thông Minh (Smart Clutch):** Khi chuyển qua lại giữa các nút bấm, hệ thống tự động thả lại mỏ neo hệ quy chiếu, loại bỏ hoàn toàn các điểm giật cục (Teleportation).
-- **Snapping/Deadband:** Áp dụng Deadband tĩnh (1.5cm) và tính năng bám trục thẳng (Snapping) giúp bạn kéo những đường cắt laser mượt mà, thẳng tắp trong không trung.
+- **Giao diện Tiếng Anh Chuyên Nghiệp:** Toàn bộ bảng điều khiển HTML và Viser 3D đã được địa phương hóa sang Tiếng Anh, loại bỏ các icon/emoji rườm rà, mang lại giao diện tinh tế, hiện đại.
+- **Chế độ Lái Xuyên Thấu (Lock UI):** Nút bấm `Lock UI (Drive Mode)` được bố trí ngay góc trái. Khi kích hoạt, tia laser của VR sẽ bắn xuyên qua bảng điều khiển, giúp kỹ sư vừa quan sát thông số theo thời gian thực vừa thoải mái vung tay lái robot mà không lo vô tình click nhầm vào các nút trên web.
+- **Tích hợp Camera (Collision Checking):** Cấu hình CuRobo (`ur3e_custom.yml`) đã được bổ sung ma trận lưới các khối cầu (spheres) ôm trọn lấy ngàm bích `tool0` để giả lập thể tích của Camera (ví dụ RealSense) gắn ngoài. Hệ thống sẽ tự động kháng cự và bảo vệ an toàn tuyệt đối, không cho camera đâm vào chướng ngại vật hay mặt bàn.
 
 ## Lưu ý An toàn (Safety Warnings)
 
