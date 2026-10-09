@@ -96,38 +96,22 @@ python3 main.py
 ```
 *Dấu hiệu thành công:* Terminal sẽ hiện dòng chữ `[MP] Motion Planner sẵn sàng` và `[Viser] Đã render vật cản`. Máy chủ Web sẽ bắt đầu lắng nghe ở cổng `8080`.
 
-### 4. Hướng dẫn Tương tác chi tiết trên Web UI
+### 4. Hướng dẫn Chạy VR Teleop Toàn tập (Meta Quest 3S)
 
-Mở trình duyệt Web (Chrome/Firefox) và truy cập địa chỉ: **[http://localhost:8080](http://localhost:8080)**
+Hệ thống giờ đây được nâng cấp mặc định hỗ trợ điều khiển cánh tay Robot bằng kính Meta Quest 3S thông qua công nghệ WebXR, AR Xuyên thấu (Passthrough) và Buồng lái ảo (Virtual Cockpit).
 
-**Thao tác 1: Khám phá Motion Planning (Robot tự lách vật cản)**
-1. Chắc chắn rằng ô `[Bật Teleop]` đang **TẮT**.
-2. Dùng chuột click và giữ Trục tọa độ 3D (Target Widget) nằm trước mũi robot.
-3. Kéo trục tọa độ đâm thẳng xuyên qua cái hộp đen hoặc đặt ra phía sau hộp đen. Lúc này hệ thống sẽ hiển thị một con "robot bóng ma" (IK Preview) báo hiệu quỹ đạo an toàn.
-4. **Nhả chuột ra!** Khối AI sẽ tự động kích hoạt, vạch ra đường đi vòng qua hộp đen và ra lệnh cho robot thật chạy lượn qua tới đích một cách trơn tru.
-
-**Thao tác 2: Khám phá Teleop thời gian thực (Zero-latency)**
-1. Nhìn sang bảng Menu bên phải, tích chọn ô **`[Bật Teleop]`**.
-2. Lúc này robot được chuyển sang trạng thái "Bám đuổi". Dùng chuột cầm Trục tọa độ 3D và từ từ kéo qua lại.
-3. Chú ý quan sát tay máy thật (hoặc trên màn hình), nó sẽ giật và bám theo con chuột của bạn lập tức 20 lần/giây mà không hề có độ trễ.
-4. Thử cố tình kéo trục tọa độ một góc vặn vẹo thật khó hoặc sát vào vật cản, Cổng an toàn sẽ lập tức ngắt động cơ và hiện cảnh báo "Lỗi vặn xoắn khớp" để bảo vệ phần cứng.
-
-### 5. Hướng dẫn Chạy VR Teleop Toàn tập (Meta Quest 3S)
-
-Hệ thống hỗ trợ điều khiển cánh tay Robot bằng kính Meta Quest 3S thông qua công nghệ WebXR, AR Xuyên thấu (Passthrough) và Buồng lái ảo (Virtual Cockpit).
-
-**Bước 1: Khởi động Máy ảo URSim**
+**Bước 1: Khởi động Máy ảo URSim (Nếu chạy mô phỏng)**
 Mở Terminal 1 và chạy lệnh để tự động tải & bật giả lập UR3e:
 ```bash
 ros2 run ur_client_library start_ursim.sh -m ur3e
 ```
 
 **Bước 2: Khởi động Server VR & Giao diện Điều khiển**
-Mở Terminal 2, di chuyển vào thư mục gốc và chạy file chính dưới dạng module:
+Mở Terminal 2, di chuyển vào thư mục gốc và khởi động hệ thống chính:
 ```bash
 cd /home/nguyen/ur_ws/curobo_ursim
 source ~/curobo/.venv/bin/activate
-python3 -m teleop_quest.main_quest
+python3 main.py
 ```
 *(Hệ thống sẽ **tự động dò tìm địa chỉ IP hiện tại của máy tính**, tự động nặn chứng chỉ SSL tương ứng và in đường link truy cập ra màn hình Terminal. Khi bạn đổi mạng Wi-Fi/Hotspot, hệ thống cũng sẽ tự động làm lại từ đầu).*
 
@@ -139,16 +123,16 @@ Do sử dụng chứng chỉ bảo mật tự tạo (Self-signed) cho IP LAN, b�
 4. Trải nghiệm màn hình **Welcome Screen Gradient** chuẩn công nghiệp hiện ra. Bấm nút **START IMMERSIVE VR**.
 5. Đeo kính và cấp quyền WebXR. Xung quanh bạn sẽ chuyển sang chế độ AR nhìn xuyên thấu, đồng thời Bảng điều khiển ảo (Virtual Cockpit) sẽ hiển thị thông số Robot Telemetry.
 
-**Bước 4: Cơ chế Điều khiển Thực chiến (Base Frame + Delta Rotation)**
-- **Kích hoạt Teleop:** Trên giao diện 2D của Viser (Laptop), tích chọn ô **`Enable Teleoperation`** (hoặc dùng laser bấm trên kính).
-- **Cơ chế Nhấc Chuột (Clutch):** Để điều khiển, bạn phải **bóp giữ ĐỒNG THỜI Cò (Trigger) + Nút hông (Grip)**. Nếu mỏi tay hoặc quá tầm với, thả 2 nút ra, kéo tay về vị trí thoải mái rồi bóp giữ lại để "túm" không gian một lần nữa.
-- **Tịnh tiến (Base Frame):** Khi bóp giữ và đẩy tay tới trước mặt, robot sẽ lao thẳng ra phía trước (theo trục X của đế) một cách dễ đoán như lái ô tô, bất kể đầu robot đang chĩa đi đâu. 
-- **Xoay cổ tay (Delta Rotation):** Khi bóp giữ và xoay vặn cổ tay, robot sẽ vặn cổ tay đúng một góc bằng với góc cổ tay bạn vừa vặn thêm. Cực kỳ an toàn, chống giật mình vặn xoắn!
-- **Độ mượt (EMA Filter):** Tín hiệu 60Hz từ Quest được đi qua bộ lọc thông thấp (EMA - Exponential Moving Average) giúp tay máy di chuyển "lả lướt" và hoàn toàn loại bỏ độ rung (jitter) của tay người.
+**Bước 4: Cơ chế Điều khiển Thực chiến (World-centric + Delta Rotation)**
+- **Kích hoạt Teleop:** Trên giao diện 2D của Viser (Laptop), tích chọn ô **`Enable Teleop`** (hoặc dùng tay bấm trên màn hình Dashboard ảo trong VR).
+- **Cơ chế Mỏ Neo (Clutch & Leash):** Để điều khiển, bạn phải **bóp giữ ĐỒNG THỜI Cò (Trigger) + Nút hông (Grip)**. Tọa độ tay máy thực tế sẽ được lấy làm mỏ neo. Nếu bị giới hạn tốc độ hoặc vướng chướng ngại vật, tâm điều khiển ảo sẽ tự động bị kìm hãm lại (Spring-Damper), ngăn chặn triệt để hiện tượng văng quỹ đạo (Ratcheting).
+- **Tịnh tiến (World-centric):** Khi bóp giữ và đẩy tay tới trước, robot sẽ lao thẳng ra phía trước (theo trục X của đế). Gạt sang ngang thì robot trượt ngang. Không quan tâm đầu ngàm đang chĩa đi đâu!
+- **Xoay cổ tay (Delta Rotation):** Khi vặn cổ tay, ngàm của tay máy cũng sẽ vặn theo một góc tương ứng. Khớp cổ tay (Wrist 3) đã được cấu hình mặc định xoay 90 độ tại điểm Home để mũi tên Đỏ luôn chỉa về phía trước, giúp việc định hướng cực kỳ trực quan.
+
 ## Lưu ý An toàn (Safety Warnings)
 
-Do hệ thống sử dụng tập lệnh truyền động liên tục `servoJ`, mô-tơ tay máy sẽ phản ứng cực kỳ bạo lực và không khoan nhượng. 
+Hệ thống đã được trang bị **3 lớp phanh hãm** (Scale 0.7, EMA Filter 0.08, và Max Velocity Clamp 0.75 rad/s) để đảm bảo độ êm ái khi chạy trên robot thật. Tuy nhiên:
 1. **LUÔN LUÔN** đặt tay lên nút Dừng Khẩn Cấp (E-Stop) của tủ điều khiển.
 2. Tuyệt đối không đứng trong bán kính hoạt động 1.5 mét của robot khi đang test Teleop.
-3. Nếu mục tiêu (Target Widget) bị xoay một góc quá hẹp, hệ thống bảo vệ Anti-Twist sẽ khóa động cơ và báo lỗi. Đây là tính năng, không phải lỗi.
+3. Nút E-STOP màu đỏ tích hợp thẳng vào giao diện VR giúp ngắt động cơ `servoJ` ngay lập tức nếu có sự cố.
 

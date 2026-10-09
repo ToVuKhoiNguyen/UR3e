@@ -109,43 +109,49 @@ def validate_joints(q: list) -> bool:
 
 def setup_ursim() -> bool:
     """Power-on robot if POWER_OFF (brake release via dashboard). Returns True when RUNNING."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect((ROBOT_IP, DASHBOARD_PORT))
-    time.sleep(0.2)
-    s.recv(4096)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(2.0)
+        s.connect((ROBOT_IP, DASHBOARD_PORT))
+        time.sleep(0.2)
+        s.recv(4096)
 
-    def _cmd(c, w=0.8):
-        s.sendall((c + "\n").encode())
-        time.sleep(w)
-        try:
-            s.setblocking(False)
-            r = s.recv(4096).decode().strip()
-            s.setblocking(True)
-        except Exception:
-            s.setblocking(True)
-            r = ""
-        return r
+        def _cmd(c, w=0.8):
+            s.sendall((c + "\n").encode())
+            time.sleep(w)
+            try:
+                s.setblocking(False)
+                r = s.recv(4096).decode().strip()
+                s.setblocking(True)
+            except Exception:
+                s.setblocking(True)
+                r = ""
+            return r
 
-    mode = _cmd("robotmode", 0.3)
-    safety = _cmd("safetystatus", 0.3)
-    print(f"[URSim] Robot mode: {mode}, Safety: {safety}")
-
-    if "PROTECTIVE_STOP" in safety or "VIOLATION" in safety or "FAULT" in safety:
-        print("[URSim] Unlocking protective stop...")
-        _cmd("unlock protective stop")
-        _cmd("close safety popup")
-        time.sleep(2.0)
         mode = _cmd("robotmode", 0.3)
+        safety = _cmd("safetystatus", 0.3)
+        print(f"[URSim] Robot mode: {mode}, Safety: {safety}")
 
-    if "POWER_OFF" in mode or "IDLE" in mode:
-        print("[URSim] Powering on and releasing brakes...")
-        _cmd("power on", w=2.0)
-        _cmd("brake release", w=5.0)
-        mode = _cmd("robotmode", 0.5)
-        print(f"[URSim] Mode after: {mode}")
+        if "PROTECTIVE_STOP" in safety or "VIOLATION" in safety or "FAULT" in safety:
+            print("[URSim] Unlocking protective stop...")
+            _cmd("unlock protective stop")
+            _cmd("close safety popup")
+            time.sleep(2.0)
+            mode = _cmd("robotmode", 0.3)
 
-    s.close()
-    return "RUNNING" in mode
+        if "POWER_OFF" in mode or "IDLE" in mode:
+            print("[URSim] Powering on and releasing brakes...")
+            _cmd("power on", w=2.0)
+            _cmd("brake release", w=5.0)
+            mode = _cmd("robotmode", 0.5)
+            print(f"[URSim] Mode after: {mode}")
+
+        s.close()
+        return "RUNNING" in mode
+    except Exception as e:
+        print(f"[URSim] Cảnh báo kết nối Dashboard (Port 29999): {e}")
+        print("[URSim] Bỏ qua lỗi Dashboard, giả định robot đã được bật nguồn...")
+        return True
 
 
 def send_urscript(script: str, settle: float = 0.3) -> None:

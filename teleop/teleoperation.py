@@ -307,7 +307,7 @@ class TeleoperationController:
                     return
                 
                 # Rate Limiter: Kẹp (clamp) vận tốc khớp tối đa để bảo vệ động cơ thực
-                MAX_VEL = 1.5  # rad/s (~85 độ/s - Tốc độ an toàn cho Teleop)
+                MAX_VEL = 0.75  # rad/s (~43 độ/s - Giảm 50% để cực kỳ an toàn cho Robot thật)
                 DT = 0.05      # 20Hz loop
                 max_dq = MAX_VEL * DT
                 for i in range(6):

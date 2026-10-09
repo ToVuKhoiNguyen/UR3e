@@ -140,7 +140,18 @@ def main():
         return [pos[0], pos[1], pos[2], axis[0]*angle, axis[1]*angle, axis[2]*angle]
         
     # Nguồn cấp tọa độ từ Kính VR, lấy Widget làm điểm neo (Anchor)
-    pose_source = DeltaPoseSource(quest_server, ctrl, scale=1.0, anchor_reference_func=get_widget_pose_as_ur)
+    def get_robot_fk_as_ur():
+        # Dùng vị trí khớp thật (q_real) để tính FK bằng bộ não CuRobo
+        # Điều này giúp loại bỏ sai lệch Calibration giữa URSim thật và CuRobo URDF
+        q_real = ctrl.joints()
+        fk_dict = teleop._curobo.fk(q_real)
+        pos = fk_dict["pos"]
+        quat_wxyz = fk_dict["quat"]
+        axis, angle = transforms3d.quaternions.quat2axangle(quat_wxyz)
+        return [pos[0], pos[1], pos[2], axis[0]*angle, axis[1]*angle, axis[2]*angle]
+        
+    # Nguồn cấp tọa độ từ Kính VR, mỏ neo vào TỌA ĐỘ THỰC TẾ của robot (thông qua CuRobo FK)
+    pose_source = DeltaPoseSource(quest_server, ctrl, scale=0.7, anchor_reference_func=get_robot_fk_as_ur, alpha=0.08)
     
     # Nguồn cấp tọa độ cho Controller (Đọc từ Widget)
     class WidgetPoseSource:
