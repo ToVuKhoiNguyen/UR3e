@@ -82,55 +82,84 @@ class DeltaPoseSource:
             self._last_trigger = True
             return None # Bỏ qua frame đầu tiên để tránh giật
 
-        # Tính toán Delta
+        # ===============================
+        # TÍNH TOÁN DELTA TỊNH TIẾN (TOOL-CENTRIC)
+        # ===============================
         current_pos_quest = np.array(frame["pos"])
-        delta_quest = current_pos_quest - self._anchor_pos_quest
+        delta_q_world = current_pos_quest - self._anchor_pos_quest
         
-        # Ánh xạ hệ tọa độ và scale (World-centric)
-        delta_robot = self.R_q2r @ delta_quest * self.scale
+        from scipy.spatial.transform import Rotation as R
+        R_q_anchor = R.from_quat(self._anchor_quat_quest_xyzw)
+        R_r_anchor = R.from_quat(self._anchor_quat_robot_xyzw)
         
-        # Safety clamp delta
-        delta_robot = np.clip(delta_robot, -self.max_delta_m, self.max_delta_m)
+        # 1. Chuyển delta tịnh tiến về Local của tay cầm lúc bấm cò
+        delta_q_local = R_q_anchor.inv().apply(delta_q_world)
         
-        # Target position
-        target_pos = self._anchor_tcp[:3] + delta_robot
+        # --- BỘ LỌC CHỐNG LỆCH TRỤC (LOCAL AXIS SNAPPING) ---
+        delta_mag = np.linalg.norm(delta_q_local)
+        if delta_mag < 0.01:  # Deadband tĩnh: 1cm
+            delta_q_local = np.zeros(3)
+        else:
+            abs_delta = np.abs(delta_q_local)
+            max_axis = np.argmax(abs_delta)
+            
+            # Tỷ lệ snapping 50%: Hỗ trợ đẩy thẳng tắp theo 1 trục
+            for i in range(3):
+                if i != max_axis and abs_delta[i] < 0.5 * abs_delta[max_axis]:
+                    delta_q_local[i] = 0.0
+                    
+        # 2. Ánh xạ Local Quest sang Local TCP
+        # Quest Local: +X(Phải), +Y(Lên), -Z(Tiến)
+        # UR TCP Local: +Z(Tiến), +Y(Trái/Phải?), +X(Xuống/Lên?)
+        # Ma trận này khóa chặt "Tiến của tay cầm" thành "Tiến của ngàm"
+        M_local_q2tcp = np.array([
+            [ 0, -1,  0], # TCP X = - Quest Y
+            [-1,  0,  0], # TCP Y = - Quest X
+            [ 0,  0, -1]  # TCP Z = - Quest Z
+        ])
+        delta_tcp_local = M_local_q2tcp.dot(delta_q_local)
+        
+        # 3. Chuyển Delta Local TCP về Robot World Space
+        delta_robot_world = R_r_anchor.apply(delta_tcp_local) * self.scale
+        delta_robot_world = np.clip(delta_robot_world, -self.max_delta_m, self.max_delta_m)
+        
+        target_pos = self._anchor_tcp[:3] + delta_robot_world
         
         # Workspace safety clamp (Hardcoded UR3e safe zone)
         target_pos[0] = np.clip(target_pos[0], -0.50, 0.50) # X
         target_pos[1] = np.clip(target_pos[1], -0.50, 0.50) # Y
         target_pos[2] = np.clip(target_pos[2],  0.05, 0.60) # Z (min 5cm above table)
 
-        # Áp dụng bộ lọc EMA (Exponential Moving Average) để chống giật
         if self._ema_pos is None:
             self._ema_pos = target_pos
         else:
             self._ema_pos = self.alpha * target_pos + (1.0 - self.alpha) * self._ema_pos
 
         # ===============================
-        # TÍNH TOÁN DELTA XOAY (ROTATION)
+        # TÍNH TOÁN DELTA XOAY (TOOL-CENTRIC)
         # ===============================
-        from scipy.spatial.transform import Rotation as R
-        
         curr_q = frame["quat"]
         curr_quat_quest_xyzw = np.array([curr_q[1], curr_q[2], curr_q[3], curr_q[0]])
-        
         R_hand_current = R.from_quat(curr_quat_quest_xyzw)
-        R_hand_anchor = R.from_quat(self._anchor_quat_quest_xyzw)
         
-        # R_delta trong không gian tay cầm
-        R_delta_hand = R_hand_current * R_hand_anchor.inv()
+        # R_delta trong không gian tay cầm (Local)
+        R_delta_hand_local = R_q_anchor.inv() * R_hand_current
         
-        # Đưa R_delta sang không gian Base của Robot
-        mat_delta_hand = R_delta_hand.as_matrix()
-        mat_delta_robot = self.R_q2r @ mat_delta_hand @ self.R_q2r.T
-        R_delta_robot = R.from_matrix(mat_delta_robot)
+        # --- BỘ LỌC DEADBAND XOAY CỔ TAY (ROTATION DEADBAND) ---
+        angle_rad = R_delta_hand_local.magnitude()
+        if angle_rad < 0.26:  # 15 độ
+            R_delta_hand_local = R.identity()
+            
+        # Ánh xạ vector góc xoay từ Tay cầm sang TCP
+        rotvec_hand = R_delta_hand_local.as_rotvec()
+        rotvec_tcp = M_local_q2tcp.dot(rotvec_hand)
+        R_delta_tcp_local = R.from_rotvec(rotvec_tcp)
         
-        # Áp dụng vào pose neo của Robot
-        R_robot_anchor = R.from_quat(self._anchor_quat_robot_xyzw)
-        R_target_robot = R_delta_robot * R_robot_anchor
+        # Áp dụng góc xoay vào TCP hiện tại
+        R_target_robot = R_r_anchor * R_delta_tcp_local
         target_quat_xyzw = R_target_robot.as_quat()
         
-        # EMA Filter cho Quaternion (Chống giật góc)
+        # EMA Filter cho Quaternion
         if self._ema_quat_xyzw is None:
             self._ema_quat_xyzw = target_quat_xyzw
         else:
@@ -139,9 +168,7 @@ class DeltaPoseSource:
             
             self._ema_quat_xyzw = self.alpha * target_quat_xyzw + (1.0 - self.alpha) * self._ema_quat_xyzw
             self._ema_quat_xyzw /= np.linalg.norm(self._ema_quat_xyzw)
-            self._ema_quat_xyzw /= np.linalg.norm(self._ema_quat_xyzw)
             
-        # Trả về định dạng wxyz cho cuRobo
         target_quat_wxyz = [self._ema_quat_xyzw[3], self._ema_quat_xyzw[0], self._ema_quat_xyzw[1], self._ema_quat_xyzw[2]]
 
         return {

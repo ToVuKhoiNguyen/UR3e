@@ -151,11 +151,11 @@ def main():
         return [pos[0], pos[1], pos[2], axis[0]*angle, axis[1]*angle, axis[2]*angle]
         
     # Nguồn cấp tọa độ từ Kính VR, mỏ neo vào TỌA ĐỘ THỰC TẾ của robot (thông qua CuRobo FK)
-    pose_source = DeltaPoseSource(quest_server, ctrl, scale=0.7, anchor_reference_func=get_robot_fk_as_ur, alpha=0.08)
+    pose_source = DeltaPoseSource(quest_server, ctrl, scale=0.5, anchor_reference_func=get_robot_fk_as_ur, alpha=0.05)
     
     # Nguồn cấp tọa độ cho Controller (Đọc từ Widget)
     class WidgetPoseSource:
-        def __init__(self, alpha=0.15):
+        def __init__(self, alpha=0.06):
             self.alpha = alpha
             self._ema_pos = None
             self._ema_quat_xyzw = None
@@ -223,7 +223,7 @@ def main():
     with server.gui.add_folder("VR Teleoperation"):
         cb_teleop = server.gui.add_checkbox("Bat VR Teleop", initial_value=False)
         cb_record = server.gui.add_checkbox("Record AI Data", initial_value=False)
-        sld_speed = server.gui.add_slider("Toc do (Scale)", min=0.1, max=2.0, step=0.1, initial_value=1.0)
+        sld_speed = server.gui.add_slider("Toc do (Scale)", min=0.1, max=2.0, step=0.1, initial_value=0.5)
         btn_home = server.gui.add_button("Reset to Home")
         ui_status = server.gui.add_text("VR Status", initial_value="Chờ...", disabled=True)
         ui_conn = server.gui.add_text("Quest Connected", initial_value="No", disabled=True)
@@ -407,7 +407,7 @@ def main():
                 
                 # Log AI Data
                 if logger.is_recording:
-                    logger.log_step(q_real, ctrl.joint_velocities(), ctrl.pose(), image_path="cam_frame_placeholder.jpg")
+                    logger.log_step(q_real, ctrl.rr.getActualQd(), ctrl.tcp(), image_path="cam_frame_placeholder.jpg")
                     
             except Exception as e:
                 ui_status.value = f"Lỗi: {e}"

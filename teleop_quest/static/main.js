@@ -3,7 +3,6 @@
         const btnEnterVR = document.getElementById('btn-enter-vr');
         const btnExitVR = document.getElementById('btn-exit-vr');
         const vrOverlay = document.getElementById('vr-overlay');
-        const btnEstop = document.getElementById('btn-estop');
         
         // Element bindings for URSim UI
         const elValSource = document.getElementById('val-source');
@@ -76,11 +75,7 @@
             }
         }
 
-        btnEstop.addEventListener('click', () => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: "estop" }));
-            }
-        });
+
         
         btnExitVR.addEventListener('click', () => {
             if (xrSession) {

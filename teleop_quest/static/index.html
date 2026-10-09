@@ -4,44 +4,38 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Meta Quest VR Teleop</title>
-    <link rel="stylesheet" href="style.css?v=7">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
     <!-- LAUNCHER SCREEN (Màn hình chờ 2D) -->
     <div id="launcher-screen">
-        <!-- Top Nav -->
-        <div class="launcher-nav">
-            <div class="nav-logo">
+        <div class="launcher-card">
+            <div class="launcher-header">
                 <div class="logo-circle">UR</div>
-                <span class="nav-title">UR3e TELEOP</span>
+                <h2>UR3e TELEOP</h2>
             </div>
-            <div class="nav-links">
-                <div class="nav-status">Host: <span id="host-ip" style="font-weight: 600;">...</span></div>
-                <div id="status" class="nav-status warning">Connecting WebSocket...</div>
+            <div class="launcher-body">
+                <p style="color: #64748b; font-size: 14px; text-align: center; margin-top: 0; margin-bottom: 25px; line-height: 1.5;">
+                    Hệ thống điều khiển từ xa độ trễ thấp dành cho Universal Robots UR3e.
+                </p>
+                <div class="info-row">
+                    <span class="info-label">Host IP</span>
+                    <span id="host-ip" class="info-value">...</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">WebSocket Status</span>
+                    <span id="status" class="info-value warning">Connecting...</span>
+                </div>
+                
+                <div class="action-buttons">
+                    <button id="btn-enter-vr" class="btn-primary" style="display: none;">▶ START IMMERSIVE VR</button>
+                    <button id="btn-preview-ui" class="btn-secondary">👁 PREVIEW UI (PC)</button>
+                </div>
             </div>
-        </div>
-        
-        <!-- Hero Content -->
-        <div class="launcher-hero">
-            <h1 class="hero-title">WELCOME</h1>
-            <p class="hero-subtitle">
-                Hệ thống điều khiển từ xa độ trễ thấp dành cho tay máy Universal Robots UR3e.<br>
-                Trải nghiệm vận hành Robot trong không gian Thực tế ảo thông qua WebXR.
-            </p>
-            
-            <div class="hero-actions">
-                <button id="btn-enter-vr" class="hero-btn-primary" style="display: none;">
-                    START IMMERSIVE VR
-                </button>
-                <button id="btn-preview-ui" class="hero-btn-secondary">
-                    PREVIEW UI (PC)
-                </button>
+            <div class="launcher-footer">
+                Powered by cuRobo & WebXR
             </div>
-        </div>
-        
-        <!-- Footer -->
-        <div class="launcher-footer">
-            Powered by cuRobo & WebXR
         </div>
     </div>
     
@@ -53,20 +47,39 @@
             <!-- Header -->
             <div class="cockpit-header">
                 <div class="header-left">
-                    <span class="title">UR3e VR Teleop</span>
+                    <div class="status-badge running">
+                        <span class="status-dot"></span>
+                        <span class="status-text">RUNNING</span>
+                    </div>
                 </div>
                 <div class="header-center">
-                    <span>PROGRAM &lt;vr_teleop&gt;</span>
+                    <span class="title">UR3e Vision Inspection</span>
                 </div>
                 <div class="header-right">
-                    <button id="btn-exit-vr" class="btn-top-menu">≡ Thoát VR</button>
+                    <button id="btn-exit-vr" class="btn-top-menu">
+                        <span style="font-size: 14px;">■</span> Thoát VR
+                    </button>
                 </div>
             </div>
             
             <!-- Body -->
             <div class="cockpit-body">
-                <!-- Sidebar -->
-                <div class="sidebar">
+                <!-- Left: Viser 3D (2/3) -->
+                <div class="viser-column">
+                    <div class="section-title">Viser 3D (Robot Status)</div>
+                    <div id="viser-view">
+                        <!-- Nhúng Viser Web UI -->
+                        <iframe id="viser-iframe" src="" width="100%" height="100%" frameborder="0"></iframe>
+                    </div>
+                </div>
+                
+                <!-- Right: Camera & Stats (1/3) -->
+                <div class="sidebar-right">
+                    <div class="section-title">Camera Stream</div>
+                    <div id="cam-stream">
+                        [ Đang chờ luồng hình ảnh... ]
+                    </div>
+                    
                     <!-- Card 1: System Status -->
                     <div class="status-card">
                         <div class="card-title">HỆ THỐNG</div>
@@ -97,95 +110,56 @@
                         </div>
                     </div>
 
-                    <!-- Card 3: Teleop Mode -->
+                    <!-- Card 4: Kinematics (Pose) -->
                     <div class="status-card">
-                        <div class="card-title">CHẾ ĐỘ VẬN HÀNH</div>
-                        <div class="card-row">
-                            <span>Khớp nối:</span>
-                            <span class="val-text">IK Solver</span>
+                        <div class="card-title" style="text-align: center;">ROBOT POSE (KINEMATICS)</div>
+                        <div style="display: flex; gap: 15px;">
+                            <!-- Left: Position -->
+                            <div style="flex: 1;">
+                                <div style="font-size: 14px; font-weight: bold; color: #64748b; margin-bottom: 8px; text-align: center;">POSITION (m)</div>
+                                <div class="card-row">
+                                    <span class="axis-label" style="font-weight:bold;color:#4CAF50;">X:</span>
+                                    <div class="fake-input" style="border:none;padding:0;background:transparent;text-align:right;"><span id="val-x" class="val-text">0.000</span></div>
+                                </div>
+                                <div class="card-row">
+                                    <span class="axis-label" style="font-weight:bold;color:#f44336;">Y:</span>
+                                    <div class="fake-input" style="border:none;padding:0;background:transparent;text-align:right;"><span id="val-y" class="val-text">0.000</span></div>
+                                </div>
+                                <div class="card-row">
+                                    <span class="axis-label" style="font-weight:bold;color:#2196F3;">Z:</span>
+                                    <div class="fake-input" style="border:none;padding:0;background:transparent;text-align:right;"><span id="val-z" class="val-text">0.000</span></div>
+                                </div>
+                            </div>
+                            
+                            <!-- Divider -->
+                            <div style="width: 2px; background: #e2e8f0; border-radius: 1px;"></div>
+
+                            <!-- Right: Orientation -->
+                            <div style="flex: 1;">
+                                <div style="font-size: 14px; font-weight: bold; color: #64748b; margin-bottom: 8px; text-align: center;">ORIENTATION (Quat)</div>
+                                <div class="card-row">
+                                    <span class="axis-label" style="font-weight:bold;">Qx:</span>
+                                    <div class="fake-input" style="border:none;padding:0;background:transparent;text-align:right;"><span id="val-qx" class="val-text">0.000</span></div>
+                                </div>
+                                <div class="card-row">
+                                    <span class="axis-label" style="font-weight:bold;">Qy:</span>
+                                    <div class="fake-input" style="border:none;padding:0;background:transparent;text-align:right;"><span id="val-qy" class="val-text">0.000</span></div>
+                                </div>
+                                <div class="card-row">
+                                    <span class="axis-label" style="font-weight:bold;">Qz:</span>
+                                    <div class="fake-input" style="border:none;padding:0;background:transparent;text-align:right;"><span id="val-qz" class="val-text">0.000</span></div>
+                                </div>
+                                <div class="card-row">
+                                    <span class="axis-label" style="font-weight:bold;">Qw:</span>
+                                    <div class="fake-input" style="border:none;padding:0;background:transparent;text-align:right;"><span id="val-qw" class="val-text">1.000</span></div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="card-row">
-                            <span>Hệ Tọa độ:</span>
-                            <span class="val-text">Base Space</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Main Form (Center) -->
-                <div class="main-form">
-                    <div class="section-title">Tool Center Point</div>
-                    
-                    <div class="form-group">
-                        <label>Position</label>
-                        <div class="input-row">
-                            <span class="axis-label">X</span>
-                            <div class="fake-input"><span id="val-x">0.000</span> <span class="unit">m</span></div>
-                        </div>
-                        <div class="input-row">
-                            <span class="axis-label">Y</span>
-                            <div class="fake-input"><span id="val-y">0.000</span> <span class="unit">m</span></div>
-                        </div>
-                        <div class="input-row">
-                            <span class="axis-label">Z</span>
-                            <div class="fake-input"><span id="val-z">0.000</span> <span class="unit">m</span></div>
-                        </div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label>Orientation (Quaternion)</label>
-                        <div class="input-row">
-                            <span class="axis-label">Qx</span>
-                            <div class="fake-input"><span id="val-qx">0.000</span></div>
-                        </div>
-                        <div class="input-row">
-                            <span class="axis-label">Qy</span>
-                            <div class="fake-input"><span id="val-qy">0.000</span></div>
-                        </div>
-                        <div class="input-row">
-                            <span class="axis-label">Qz</span>
-                            <div class="fake-input"><span id="val-qz">0.000</span></div>
-                        </div>
-                        <div class="input-row">
-                            <span class="axis-label">Qw</span>
-                            <div class="fake-input"><span id="val-qw">1.000</span></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Visualization (Right) -->
-                <div class="visualization">
-                    <div class="section-title">Camera Stream</div>
-                    <div id="cam-stream">
-                        [ Đang chờ luồng hình ảnh... ]
-                    </div>
-                    
-                    <div class="section-title" style="margin-top: 15px;">Viser 3D (Robot Status)</div>
-                    <div id="viser-view">
-                        <!-- Nhúng Viser Web UI -->
-                        <iframe id="viser-iframe" src="" width="100%" height="100%" frameborder="0"></iframe>
                     </div>
                 </div>
             </div>
             
-            <!-- Footer -->
-            <div class="cockpit-footer">
-                <div class="footer-left">
-                    <div class="status-indicator running"></div>
-                    <span class="status-text">Running</span>
-                </div>
-                <div class="footer-center">
-                    <div class="speed-slider-container">
-                        <div class="speed-slider-track">
-                            <div class="speed-slider-fill"></div>
-                            <div class="speed-slider-thumb"></div>
-                        </div>
-                        <span class="speed-text">Speed 100%</span>
-                    </div>
-                </div>
-                <div class="footer-right">
-                    <button id="btn-estop">⏹ E-STOP</button>
-                </div>
-            </div>
+
         </div>
     </div>
 

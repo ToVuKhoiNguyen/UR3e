@@ -120,19 +120,21 @@ Do sử dụng chứng chỉ bảo mật tự tạo (Self-signed) cho IP LAN, b�
 1. Đeo kính Quest (đảm bảo chung mạng Wi-Fi Hotspot với Laptop).
 2. Mở trình duyệt Web của Quest, truy cập **Cổng Dữ Liệu Ngầm**: `https://[IP_HIỆN_TẠI]:8444` $\rightarrow$ Trình duyệt cảnh báo đỏ $\rightarrow$ Bấm **Advanced $\rightarrow$ Proceed** $\rightarrow$ Đóng Tab.
 3. Truy cập **Cổng Giao Diện**: `https://[IP_HIỆN_TẠI]:8443` $\rightarrow$ Trình duyệt cảnh báo đỏ $\rightarrow$ Bấm **Advanced $\rightarrow$ Proceed**.
-4. Trải nghiệm màn hình **Welcome Screen Gradient** chuẩn công nghiệp hiện ra. Bấm nút **START IMMERSIVE VR**.
-5. Đeo kính và cấp quyền WebXR. Xung quanh bạn sẽ chuyển sang chế độ AR nhìn xuyên thấu, đồng thời Bảng điều khiển ảo (Virtual Cockpit) sẽ hiển thị thông số Robot Telemetry.
+4. Trải nghiệm màn hình **Welcome Screen phong cách Light/Modern công nghiệp** hiện ra (nền xám khói sang trọng). Bấm nút **START IMMERSIVE VR**.
+5. Đeo kính và cấp quyền WebXR. Xung quanh bạn sẽ chuyển sang chế độ AR nhìn xuyên thấu, đồng thời Bảng điều khiển ảo (Virtual Cockpit) sẽ hiển thị các thẻ thông số Robot Pose.
 
-**Bước 4: Cơ chế Điều khiển Thực chiến (World-centric + Delta Rotation)**
-- **Kích hoạt Teleop:** Trên giao diện 2D của Viser (Laptop), tích chọn ô **`Enable Teleop`** (hoặc dùng tay bấm trên màn hình Dashboard ảo trong VR).
-- **Cơ chế Mỏ Neo (Clutch & Leash):** Để điều khiển, bạn phải **bóp giữ ĐỒNG THỜI Cò (Trigger) + Nút hông (Grip)**. Tọa độ tay máy thực tế sẽ được lấy làm mỏ neo. Nếu bị giới hạn tốc độ hoặc vướng chướng ngại vật, tâm điều khiển ảo sẽ tự động bị kìm hãm lại (Spring-Damper), ngăn chặn triệt để hiện tượng văng quỹ đạo (Ratcheting).
-- **Tịnh tiến (World-centric):** Khi bóp giữ và đẩy tay tới trước, robot sẽ lao thẳng ra phía trước (theo trục X của đế). Gạt sang ngang thì robot trượt ngang. Không quan tâm đầu ngàm đang chĩa đi đâu!
-- **Xoay cổ tay (Delta Rotation):** Khi vặn cổ tay, ngàm của tay máy cũng sẽ vặn theo một góc tương ứng. Khớp cổ tay (Wrist 3) đã được cấu hình mặc định xoay 90 độ tại điểm Home để mũi tên Đỏ luôn chỉa về phía trước, giúp việc định hướng cực kỳ trực quan.
+**Bước 4: Cơ chế Điều khiển Thực chiến (Tool-Centric Mapping)**
+- **Kích hoạt Teleop:** Trên giao diện điều khiển (PC hoặc VR), tích chọn ô **`Bat VR Teleop`**.
+- **Cơ chế Mỏ Neo (Clutch & Leash):** Để điều khiển, bạn phải **bóp giữ ĐỒNG THỜI Cò (Trigger) + Nút hông (Grip)**.
+- **Tịnh tiến & Xoay góc (Thuật toán Hóa thân - Tool-centric):** Từ bản cập nhật mới nhất, bàn tay của bạn chính là ngàm (TCP) của robot!
+  - Khi bóp cò và **đâm thẳng tay về phía trước**, robot sẽ **đâm ngàm thẳng về phía trước** (dọc theo trục mũi ngàm). Bất kể bạn đứng quay lưng hay đối diện, hướng chuyển động của tay sẽ 1:1 với hướng chuyển động của ngàm.
+  - Vặn/Lắc cổ tay sẽ trực tiếp làm xoay cụm ngàm theo nguyên lý cục bộ (Local axes).
+  - Tích hợp bộ lọc **Deadband/Axis Snapping**: Tự động triệt tiêu lực run tay văng ngang khi cố tình đẩy thẳng (độ lệch dưới 50% sẽ bị ép về 0).
 
 ## Lưu ý An toàn (Safety Warnings)
 
-Hệ thống đã được trang bị **3 lớp phanh hãm** (Scale 0.7, EMA Filter 0.08, và Max Velocity Clamp 0.75 rad/s) để đảm bảo độ êm ái khi chạy trên robot thật. Tuy nhiên:
+Hệ thống đã được trang bị **3 lớp phanh hãm** (Scale 0.5, EMA Filter 0.05 siêu mượt, và Max Velocity Clamp) để đảm bảo độ êm ái cực cao khi chạy trên robot thật. Tuy nhiên:
 1. **LUÔN LUÔN** đặt tay lên nút Dừng Khẩn Cấp (E-Stop) của tủ điều khiển.
 2. Tuyệt đối không đứng trong bán kính hoạt động 1.5 mét của robot khi đang test Teleop.
-3. Nút E-STOP màu đỏ tích hợp thẳng vào giao diện VR giúp ngắt động cơ `servoJ` ngay lập tức nếu có sự cố.
+3. Cơ chế theo dõi (Tracking) được tối ưu hóa cho độ mượt mà, do đó sẽ có một độ trễ nhỏ rải đều (Elastic band effect) giữa tay cầm và robot thật.
 
