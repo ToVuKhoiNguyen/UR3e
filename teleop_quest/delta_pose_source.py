@@ -35,22 +35,30 @@ class DeltaPoseSource:
         self._ema_pos = None
         self._ema_quat_xyzw = None
         
-        self._last_trigger = False
+        self._last_button_state = 0
 
     def get_pose(self):
         frame = self.server.get_frame()
         if not frame:
             return None
 
-        # Dead-man switch: phải bóp cả Trigger (cò) + Grip (hông)
-        current_trigger = frame.get("trigger", False) and frame.get("grip", False)
+        # Tách biệt điều khiển Tịnh tiến (Trigger) và Xoay (Grip)
+        is_translating = frame.get("trigger", False)
+        is_rotating = frame.get("grip", False)
         
-        if not current_trigger:
-            self._last_trigger = False
+        current_button_state = 0
+        if is_translating: current_button_state += 1
+        if is_rotating: current_button_state += 2
+        
+        if current_button_state == 0:
+            self._last_button_state = 0
             return None
 
-        # Cạnh lên của Trigger -> Ghi nhớ điểm neo (anchor)
-        if current_trigger and not self._last_trigger:
+        # TÍNH NĂNG CLUTCH THÔNG MINH:
+        # Bất cứ khi nào sếp thay đổi nút bấm (Vd: Đang Tịnh tiến -> Chuyển sang Xoay),
+        # Hệ thống sẽ TỰ ĐỘNG CHỐT MỎ NEO MỚI (Reset Anchor). 
+        # Điều này loại bỏ hoàn toàn lỗi "nhảy cóc (teleport) tọa độ" do bị ép biến delta về 0.
+        if current_button_state != self._last_button_state:
             self._anchor_pos_quest = np.array(frame["pos"])
             
             q_q = frame["quat"] # [w, x, y, z]
@@ -82,69 +90,67 @@ class DeltaPoseSource:
             
             self._ema_pos = None
             self._ema_quat_xyzw = None
-            self._last_trigger = True
+            self._last_button_state = current_button_state
             return None # Bỏ qua frame đầu tiên để tránh giật
 
         # ===============================
         # TÍNH TOÁN DELTA TỊNH TIẾN (TOOL-CENTRIC)
         # ===============================
-        current_pos_quest = np.array(frame["pos"])
-        delta_q_world = current_pos_quest - self._anchor_pos_quest
+        diag_msg = "STANDING STILL"
+        delta_mag = 0.0
         
         from scipy.spatial.transform import Rotation as R
         R_q_anchor = R.from_quat(self._anchor_quat_quest_xyzw)
         R_r_anchor = R.from_quat(self._anchor_quat_robot_xyzw)
         
-        # 1. Chuyển delta tịnh tiến về Local của tay cầm lúc bấm cò
-        delta_q_local = R_q_anchor.inv().apply(delta_q_world)
-        
-        # --- BỘ LỌC CHỐNG NHIỄU & CHẨN ĐOÁN (DIAGNOSTICS) ---
-        delta_mag = np.linalg.norm(delta_q_local)
-        diag_msg = "STANDING STILL"
-        
-        if delta_mag < 0.015:  # Deadband tĩnh: Tăng lên 1.5cm để triệt tiêu hoàn toàn nhiễu rung tay
-            delta_q_local = np.zeros(3)
-        else:
-            abs_delta = np.abs(delta_q_local)
-            max_axis = np.argmax(abs_delta)
-            
-            # Tỷ lệ snapping 60%: Khóa trục gắt hơn để chặn các hướng dịch chuyển sai ngoài ý muốn
-            for i in range(3):
-                if i != max_axis and abs_delta[i] < 0.6 * abs_delta[max_axis]:
-                    delta_q_local[i] = 0.0
-                    
-            # Chẩn đoán (Quest Local: 0=Phải/Trái, 1=Lên/Xuống, 2=Lùi/Tiến)
-            axis_names = ["Ngang (TRÁI/PHẢI)", "Dọc (LÊN/XUỐNG)", "Trục dọc (TIẾN/LÙI)"]
-            direction = "+" if delta_q_local[max_axis] > 0 else "-"
-            # Z âm là tiến tới trước
-            if max_axis == 2:
-                direction_word = "LÙI (Về phía sếp)" if delta_q_local[max_axis] > 0 else "TIẾN (Đâm thẳng)"
-            elif max_axis == 1:
-                direction_word = "LÊN TRÊN" if delta_q_local[max_axis] > 0 else "XUỐNG DƯỚI"
-            else:
-                direction_word = "SANG PHẢI" if delta_q_local[max_axis] > 0 else "SANG TRÁI"
-                
-            diag_msg = f"{direction_word}"
-
-        import time
-        current_time = time.time()
-        if diag_msg != self._last_diag_msg or (current_time - self._last_diag_time > 1.5):
-            if diag_msg != "STANDING STILL":
-                print(f"[Chẩn đoán VR] Hướng vung tay: {diag_msg} (Lực: {delta_mag*100:.1f}cm)")
-            self._last_diag_msg = diag_msg
-            self._last_diag_time = current_time
-                    
-        # 2. Ánh xạ Local Quest sang Local TCP
-        # Quest Local: +X(Phải), +Y(Lên), -Z(Tiến)
-        # UR TCP Local: +Z(Tiến), +Y(Trái/Phải?), +X(Xuống/Lên?)
-        # Ma trận này khóa chặt "Tiến của tay cầm" thành "Tiến của ngàm"
+        # Meta Quest GripSpace: +X(Phải), -Y(Tiến), -Z(Lên)
+        # UR TCP Local: +Z(Tiến), -X(Lên), +Y(Phải)
         M_local_q2tcp = np.array([
-            [ 0, -1,  0], # TCP X = - Quest Y
-            [-1,  0,  0], # TCP Y = - Quest X
-            [ 0,  0, -1]  # TCP Z = - Quest Z
+            [ 0,  0,  1], # TCP X (Lên/Xuống) = Quest Z
+            [ 1,  0,  0], # TCP Y (Trái/Phải) = Quest X
+            [ 0, -1,  0]  # TCP Z (Tiến/Lùi)  = - Quest Y
         ])
-        delta_tcp_local = M_local_q2tcp.dot(delta_q_local)
         
+        if is_translating:
+            current_pos_quest = np.array(frame["pos"])
+            delta_q_world = current_pos_quest - self._anchor_pos_quest
+            
+            # 1. Chuyển delta tịnh tiến về Local của tay cầm lúc bấm cò
+            delta_q_local = R_q_anchor.inv().apply(delta_q_world)
+            
+            # --- BỘ LỌC CHỐNG NHIỄU & CHẨN ĐOÁN (DIAGNOSTICS) ---
+            delta_mag = np.linalg.norm(delta_q_local)
+            
+            if delta_mag < 0.015:  # Deadband tĩnh: Tăng lên 1.5cm để triệt tiêu hoàn toàn nhiễu rung tay
+                delta_q_local = np.zeros(3)
+            else:
+                # SOFT DEADBAND: Khử độ nhảy vọt (Jerk) khi vượt qua ngưỡng 1.5cm.
+                delta_q_local = delta_q_local * ((delta_mag - 0.015) / delta_mag)
+                
+                abs_delta = np.abs(delta_q_local)
+                max_axis = np.argmax(abs_delta)
+                
+                # Tỷ lệ snapping 60%: Khóa trục gắt hơn để chặn các hướng dịch chuyển sai ngoài ý muốn
+                for i in range(3):
+                    if i != max_axis and abs_delta[i] < 0.6 * abs_delta[max_axis]:
+                        delta_q_local[i] = 0.0
+                        
+                # Chẩn đoán (Quest Local theo GripSpace thực tế: X=Trái/Phải, Y=Lùi/Tiến, Z=Xuống/Lên)
+                if max_axis == 2:
+                    direction_word = "LÊN TRÊN" if delta_q_local[max_axis] < 0 else "XUỐNG DƯỚI"
+                elif max_axis == 1:
+                    direction_word = "TIẾN (Đâm thẳng)" if delta_q_local[max_axis] < 0 else "LÙI (Về phía sếp)"
+                else:
+                    direction_word = "SANG PHẢI" if delta_q_local[max_axis] > 0 else "SANG TRÁI"
+                    
+                diag_msg = f"{direction_word}"
+                        
+            # 2. Ánh xạ Local Quest sang Local TCP
+            delta_tcp_local = M_local_q2tcp.dot(delta_q_local)
+        else:
+            delta_tcp_local = np.zeros(3)
+            diag_msg = "CHỈ XOAY (KHÓA TỊNH TIẾN)"
+            
         # 3. Chuyển Delta Local TCP về Robot World Space
         delta_robot_world = R_r_anchor.apply(delta_tcp_local) * self.scale
         delta_robot_world = np.clip(delta_robot_world, -self.max_delta_m, self.max_delta_m)
@@ -161,26 +167,44 @@ class DeltaPoseSource:
         else:
             self._ema_pos = self.alpha * target_pos + (1.0 - self.alpha) * self._ema_pos
 
+        import time
+        current_time = time.time()
+        if diag_msg != self._last_diag_msg or (current_time - self._last_diag_time > 1.5):
+            if diag_msg != "STANDING STILL":
+                tp = self._ema_pos
+                print(f"[Chẩn đoán VR] Hướng: {diag_msg} | Lực: {delta_mag*100:.1f}cm | Tọa độ đích (X,Y,Z): [{tp[0]:.3f}, {tp[1]:.3f}, {tp[2]:.3f}]")
+            self._last_diag_msg = diag_msg
+            self._last_diag_time = current_time
+
         # ===============================
         # TÍNH TOÁN DELTA XOAY (TOOL-CENTRIC)
         # ===============================
-        curr_q = frame["quat"]
-        curr_quat_quest_xyzw = np.array([curr_q[1], curr_q[2], curr_q[3], curr_q[0]])
-        R_hand_current = R.from_quat(curr_quat_quest_xyzw)
-        
-        # R_delta trong không gian tay cầm (Local)
-        R_delta_hand_local = R_q_anchor.inv() * R_hand_current
-        
-        # --- BỘ LỌC DEADBAND XOAY CỔ TAY (ROTATION DEADBAND) ---
-        angle_rad = R_delta_hand_local.magnitude()
-        if angle_rad < 0.26:  # 15 độ
-            R_delta_hand_local = R.identity()
+        if is_rotating:
+            curr_q = frame["quat"]
+            curr_quat_quest_xyzw = np.array([curr_q[1], curr_q[2], curr_q[3], curr_q[0]])
+            R_hand_current = R.from_quat(curr_quat_quest_xyzw)
             
-        # Ánh xạ vector góc xoay từ Tay cầm sang TCP
-        rotvec_hand = R_delta_hand_local.as_rotvec()
-        rotvec_tcp = M_local_q2tcp.dot(rotvec_hand)
-        R_delta_tcp_local = R.from_rotvec(rotvec_tcp)
-        
+            # R_delta trong không gian tay cầm (Local)
+            R_delta_hand_local = R_q_anchor.inv() * R_hand_current
+            
+            # --- BỘ LỌC DEADBAND XOAY CỔ TAY (SOFT ROTATION DEADBAND) ---
+            angle_rad = R_delta_hand_local.magnitude()
+            rot_deadband = 0.20  # ~11.5 độ
+            if angle_rad < rot_deadband:
+                R_delta_hand_local = R.identity()
+            else:
+                # Trừ hao phần deadband để góc xoay bắt đầu từ 0 một cách mượt mà
+                scale_factor = (angle_rad - rot_deadband) / angle_rad
+                rotvec = R_delta_hand_local.as_rotvec()
+                R_delta_hand_local = R.from_rotvec(rotvec * scale_factor)
+                
+            # Ánh xạ vector góc xoay từ Tay cầm sang TCP
+            rotvec_hand = R_delta_hand_local.as_rotvec()
+            rotvec_tcp = M_local_q2tcp.dot(rotvec_hand)
+            R_delta_tcp_local = R.from_rotvec(rotvec_tcp)
+        else:
+            R_delta_tcp_local = R.identity()
+            
         # Áp dụng góc xoay vào TCP hiện tại
         R_target_robot = R_r_anchor * R_delta_tcp_local
         target_quat_xyzw = R_target_robot.as_quat()

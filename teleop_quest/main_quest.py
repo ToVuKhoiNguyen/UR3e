@@ -162,7 +162,7 @@ def main():
             
         def get_pose(self):
             import numpy as np
-            target_pos = target_widget.position
+            target_pos = np.array(target_widget.position)
             target_quat_wxyz = target_widget.wxyz
             target_quat_xyzw = np.array([target_quat_wxyz[1], target_quat_wxyz[2], target_quat_wxyz[3], target_quat_wxyz[0]])
             
@@ -243,12 +243,18 @@ def main():
             print("[AI Logger] ĐÃ DỪNG thu thập dữ liệu.")
         
     def _on_btn_home_click(_):
+        nonlocal _last_teleop_state
         if not mp:
             ui_status.value = "Lỗi: Không tìm thấy Motion Planner!"
             return
+            
         if cb_teleop.value:
-            ui_status.value = "Vui lòng TẮT VR Teleop trước khi về Home!"
-            return
+            # Tự động TẮT Teleop an toàn trước khi chạy lệnh Home
+            cb_teleop.value = False
+            teleop.enabled = False
+            _last_teleop_state = False
+            executor.disconnect()
+            time.sleep(0.5) # Đợi nhả điều khiển RTDE
             
         print("[Hệ thống] Đang tính toán đường về Home...")
         ui_status.value = "Đang quy hoạch về Home..."
@@ -283,6 +289,9 @@ def main():
             target_widget.wxyz = fk_res["quat"]
             widget_pose_source._ema_pos = None
             widget_pose_source._ema_quat_xyzw = None
+            
+            # Tự động BẬT LẠI Teleop để sếp dùng luôn
+            cb_teleop.value = True
         else:
             ui_status.value = "Lỗi: Không tìm được đường về Home!"
             print("[Lỗi] Không tìm được đường về Home an toàn.")
@@ -297,36 +306,6 @@ def main():
         sys.exit(0)
     signal.signal(signal.SIGINT, handle_sigint)
 
-    # ==== TỰ ĐỘNG CHẠY VỀ HOME LÚC KHỞI ĐỘNG ====
-    if mp is not None:
-        print("[Hệ thống] Tự động quy hoạch về Home lúc khởi động...")
-        q_start = JointState.from_position(torch.tensor([START_JOINTS], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
-        # Sửa q_home xoay base 90 độ để tránh kẹt tường, và xoay cổ tay (wrist 3) -90 độ để trục X (Đỏ) chỉa thẳng tới trước
-        q_home = JointState.from_position(torch.tensor([[1.5708, -1.5708, 1.5708, -1.5708, -1.5708, -1.5708]], dtype=torch.float32, device="cuda"), joint_names=mp.joint_names)
-        res = mp.plan_cspace(q_home, current_state=q_start)
-        if res is not None and res.success.any():
-            if hasattr(res, 'get_interpolated_plan'):
-                traj = res.get_interpolated_plan().position.squeeze().cpu().tolist()
-            else:
-                traj = res.solution.position.squeeze().cpu().tolist() if hasattr(res.solution, 'position') else res.solution.squeeze().cpu().tolist()
-            executor.connect()
-            time.sleep(1.0) # Đợi script RTDE khởi động trên robot
-            for q in traj:
-                executor._ctrl.servoJ(q, 0.0, 0.0, POLL_SLEEP, 0.1, 300)
-                js = JointState.from_position(torch.tensor([q], device="cuda", dtype=torch.float32), joint_names=mp.joint_names)
-                viz.set_joint_state(js)
-                time.sleep(POLL_SLEEP)
-            executor.disconnect()
-            print("[Hệ thống] Đã khởi động an toàn tại Home.")
-            
-            # Cập nhật lại Widget cho khớp với Home bằng Forward Kinematics (bỏ qua độ trễ RTDE)
-            fk_res = teleop._curobo.fk(traj[-1])
-            target_widget.position = fk_res["pos"]
-            target_widget.wxyz = fk_res["quat"]
-            
-            # Reset luôn EMA filter
-            widget_pose_source._ema_pos = None
-            widget_pose_source._ema_quat_xyzw = None
 
     # Vòng lặp chính (20Hz)
     print("\n" + "="*30)
@@ -374,18 +353,60 @@ def main():
                 watchdog.disarm()
 
         if teleop.enabled:
-            # 1. Đọc tín hiệu từ kính VR
-            vr_pose = pose_source.get_pose()
-            if vr_pose is not None:
-                # Nếu sếp đang bóp cò, cập nhật tọa độ Widget 3D theo tay sếp
-                target_widget.position = vr_pose["pos"]
-                target_widget.wxyz = vr_pose["quat"]
-            
-            # Nếu sếp không bóp cò, Widget 3D sẽ đứng im chờ đợi, 
-            # Controller lấy tọa độ từ Widget để giải IK (tracking the widget).
-
             try:
                 q_real = ctrl.joints()
+                
+                # 1. Tính toán khoảng cách (chỉ để in Log nếu cần)
+                import numpy as np
+                fk_res = teleop._curobo.fk(q_real)
+                
+                if not hasattr(pose_source, "out_of_reach_time"):
+                    pose_source.out_of_reach_time = 0.0
+                
+                # Chạy luồng Teleoperation gốc chuẩn (Widget -> IK -> Robot)
+                # Đưa teleop.step LÊN TRƯỚC để lấy status (Thành công hay IK Thất bại)
+                teleop.step(q_real)
+                current_status = teleop.get_status()
+                ui_status.value = current_status
+                
+                # 2. Đọc tín hiệu từ kính VR
+                vr_pose = pose_source.get_pose()
+                if vr_pose is not None:
+                    # Nếu đang bóp cò VR, cập nhật tọa độ Widget 3D
+                    target_widget.position = vr_pose["pos"]
+                    target_widget.wxyz = vr_pose["quat"]
+                    pose_source.out_of_reach_time = 0.0 # Đang bóp cò thì reset bộ đếm
+                else:
+                    # NẾU SẾP ĐANG THẢ CÒ (Dùng chuột hoặc đứng im)
+                    # Dùng trực tiếp Trạng thái để biết có ngoài tầm với hay không
+                    status_low = current_status.lower()
+                    is_out_of_reach = "ngoai tam voi" in status_low or "dung vat can" in status_low or "tu the ket" in status_low or "singularity" in status_low
+                    
+                    if is_out_of_reach:
+                        pose_source.out_of_reach_time += POLL_SLEEP
+                        
+                        # Debug in ra mỗi 0.5s để theo dõi
+                        if hasattr(pose_source, "debug_tick"):
+                            pose_source.debug_tick += 1
+                        else:
+                            pose_source.debug_tick = 0
+                            
+                        if pose_source.debug_tick % 10 == 0:
+                            dist = np.linalg.norm(np.array(fk_res["pos"]) - np.array(target_widget.position))
+                            print(f"[Debug] Lỗi IK (Cách {dist*100:.1f}cm), Thời gian kẹt: {pose_source.out_of_reach_time:.1f}s")
+                    else:
+                        pose_source.out_of_reach_time = 0.0
+                        
+                    if pose_source.out_of_reach_time > 2.0:
+                        dist = np.linalg.norm(np.array(fk_res["pos"]) - np.array(target_widget.position))
+                        print(f"[Auto-Snap] Trục tọa độ bị kẹt ngoài tầm với ({dist*100:.1f}cm). Tự động thu hồi!")
+                        target_widget.position = fk_res["pos"]
+                        target_widget.wxyz = fk_res["quat"]
+                        
+                        # Reset bộ lọc EMA
+                        widget_pose_source._ema_pos = None
+                        widget_pose_source._ema_quat_xyzw = None
+                        pose_source.out_of_reach_time = 0.0
                 
                 # Update robot thật tren Viser
                 js = JointState.from_position(
@@ -394,17 +415,10 @@ def main():
                 )
                 viz.set_joint_state(js)
                 
-                # Chạy luồng Teleoperation gốc chuẩn (Widget -> IK -> Robot)
-                teleop.step(q_real)
-                
-                # Lấy trạng thái từ SafetyGate và CuRobo
-                current_status = teleop.get_status()
-                ui_status.value = current_status
-                
-                # Nếu IK fail hoặc vướng Singularity -> Rung tay cầm
+                # Nếu IK fail hoặc vướng Singularity -> Rung tay cầm (VR)
                 if "thất bại" in current_status.lower() or "cảnh báo" in current_status.lower() or "singularity" in current_status.lower():
                     quest_server.send_haptic(intensity=1.0, duration=150)
-                
+                    
                 # Log AI Data
                 if logger.is_recording:
                     logger.log_step(q_real, ctrl.rr.getActualQd(), ctrl.tcp(), image_path="cam_frame_placeholder.jpg")

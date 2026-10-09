@@ -225,7 +225,7 @@ class TeleoperationController:
 
         self._enabled = False
         self._last_valid_q = None
-        self._status  = "⏸ Teleop tắt"
+        self._status  = "⏸ Đã tắt"
         self._latency = {"pyroki_ms": 0.0, "curobo_ms": 0.0}
         self._lock = threading.Lock()
 
@@ -242,7 +242,7 @@ class TeleoperationController:
             self._last_valid_q = None
         elif not value and self._enabled:
             self._exec.disconnect()
-            self._status = "⏸ Teleop tắt"
+            self._status = "⏸ Đã tắt"
         self._enabled = value
 
     def get_status(self):
@@ -303,7 +303,7 @@ class TeleoperationController:
                 max_jump = max(abs(q_target[i] - self._last_valid_q[i]) for i in range(6))
                 if max_jump > 0.4:  # ~23 độ
                     with self._lock:
-                        self._status = "Teleop: Tu the ket (Loi van xoan khop) - Dung im"
+                        self._status = "Tu the ket (Loi van xoan khop) - Dung im"
                     return
                 
                 # Rate Limiter: Kẹp (clamp) vận tốc khớp tối đa để bảo vệ động cơ thực
@@ -322,17 +322,17 @@ class TeleoperationController:
             with self._lock:
                 if result_pk["q"] is not None:
                     # PyRoki (không có check va chạm) vươn tới được, nhưng CuRobo từ chối -> Chắc chắn đụng vật cản!
-                    self._status = "Teleop: Dung vat can - Dung im"
+                    self._status = "Dung vat can - Dung im"
                 else:
                     # Cả hai đều không giải được -> Nằm ngoài tầm với.
-                    self._status = "Teleop: Ngoai tam voi - Dung im"
+                    self._status = "Ngoai tam voi - Dung im"
             return
 
         # ── Kiểm tra SafetyGate ──────────────────────────────────────────────
         gate = self._gate.check(q_target)
         if not gate["pass"]:
             with self._lock:
-                self._status = f"Teleop: Dung - {gate['reason']}"
+                self._status = f"Dung - {gate['reason']}"
             return
 
         # ── Gọi RTDEControl.servoJ ───────────────────────────────────────────
@@ -344,7 +344,7 @@ class TeleoperationController:
         sigma = gate["sigma_min"]
         with self._lock:
             self._status = (
-                f"Teleop [{chosen}] | "
+                f"[{chosen}] | "
                 f"sigma={sigma:.3f} | "
                 f"PyRoki:{result_pk['latency_ms']:.1f}ms | "
                 f"CuRobo:{result_cu['latency_ms']:.1f}ms"
