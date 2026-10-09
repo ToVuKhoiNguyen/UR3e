@@ -62,17 +62,20 @@
         }
 
         function checkWebXR() {
+            btnEnterVR.style.display = 'flex';
             if (navigator.xr) {
                 navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
                     if (supported) {
-                        btnEnterVR.style.display = 'inline-block';
-                        statusDiv.innerText = "WebXR Ready. Press Enter VR.";
+                        btnEnterVR.innerText = 'START IMMERSIVE VR';
+                        btnEnterVR.isVR = true;
                     } else {
-                        statusDiv.innerText = "immersive-vr not supported on this browser.";
+                        btnEnterVR.innerText = 'START DASHBOARD';
+                        btnEnterVR.isVR = false;
                     }
                 });
             } else {
-                statusDiv.innerText = "WebXR not available (navigator.xr is undefined). Are you on HTTPS?";
+                btnEnterVR.innerText = 'START DASHBOARD';
+                btnEnterVR.isVR = false;
             }
         }
 
@@ -107,26 +110,29 @@
             }
         });
 
-        // Debug mode: Cho phép xem trước Cockpit trên máy tính PC
-        document.getElementById('btn-preview-ui').addEventListener('click', () => {
-            vrOverlay.style.display = 'flex';
-            document.getElementById('launcher-screen').style.display = 'none';
-            document.body.style.backgroundColor = '#ccc'; // Giả lập nền AR
-        });
-
         btnEnterVR.addEventListener('click', () => {
-            if (!xrSession) {
-                // Yêu cầu chế độ AR với dom-overlay
-                navigator.xr.requestSession('immersive-ar', {
-                    optionalFeatures: ['local-floor', 'bounded-floor', 'dom-overlay'],
-                    domOverlay: { root: vrOverlay }
-                }).then(onSessionStarted).catch((err) => {
-                    console.log("AR failed, fallback to VR", err);
-                    navigator.xr.requestSession('immersive-vr', {
+            if (btnEnterVR.isVR) {
+                if (!xrSession) {
+                    // DOM Overlay BẮT BUỘC phải hiển thị (không được display: none) TRƯỚC KHI requestSession
+                    vrOverlay.style.display = 'flex';
+                    
+                    // Yêu cầu chế độ AR với dom-overlay
+                    navigator.xr.requestSession('immersive-ar', {
                         optionalFeatures: ['local-floor', 'bounded-floor', 'dom-overlay'],
                         domOverlay: { root: vrOverlay }
-                    }).then(onSessionStarted);
-                });
+                    }).then(onSessionStarted).catch((err) => {
+                        console.log("AR failed, fallback to VR", err);
+                        navigator.xr.requestSession('immersive-vr', {
+                            optionalFeatures: ['local-floor', 'bounded-floor', 'dom-overlay'],
+                            domOverlay: { root: vrOverlay }
+                        }).then(onSessionStarted);
+                    });
+                }
+            } else {
+                // PC Preview mode
+                vrOverlay.style.display = 'flex';
+                document.getElementById('launcher-screen').style.display = 'none';
+                document.body.style.backgroundColor = '#ccc'; // Giả lập nền AR
             }
         });
 

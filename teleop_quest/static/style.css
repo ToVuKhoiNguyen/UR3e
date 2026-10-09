@@ -496,20 +496,11 @@ button {
 }
 
 .btn-primary {
-    background: #84cc16;
-    color: white;
-}
-
-.btn-primary:hover {
-    background: #65a30d;
-}
-
-.btn-secondary {
     background: #64748b;
     color: white;
 }
 
-.btn-secondary:hover {
+.btn-primary:hover {
     background: #475569;
 }
 

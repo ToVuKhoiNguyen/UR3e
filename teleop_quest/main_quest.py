@@ -38,38 +38,11 @@ def main():
     print(" KHỞI ĐỘNG HỆ THỐNG VR TELEOP (META QUEST) ")
     print("="*60)
 
-    # 1. Khởi động WebXR Server & Cập nhật IP/SSL
-    import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(('10.255.255.255', 1))
-        local_ip = s.getsockname()[0]
-    except Exception:
-        local_ip = '127.0.0.1'
-    finally:
-        s.close()
-
+    from teleop_quest.network_utils import get_local_ip, setup_ssl
+    local_ip = get_local_ip()
     base_dir = os.path.dirname(os.path.dirname(__file__))
-    cert_path = os.path.join(base_dir, "certs", "cert.pem")
-    key_path = os.path.join(base_dir, "certs", "key.pem")
-    
     print(f"IP hiện tại: {local_ip}")
-    os.makedirs(os.path.join(base_dir, "certs"), exist_ok=True)
-    
-    ip_cache_path = os.path.join(base_dir, "certs", "ip_cache.txt")
-    cached_ip = ""
-    if os.path.exists(ip_cache_path):
-        with open(ip_cache_path, "r") as f:
-            cached_ip = f.read().strip()
-
-    if not os.path.exists(cert_path) or cached_ip != local_ip:
-        print(f"IP thay đổi (hoặc chạy lần đầu). Đang tự động tạo SSL cho IP: {local_ip}...")
-        subprocess.run(
-            f"openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout {key_path} -out {cert_path} -subj '/CN={local_ip}'", 
-            shell=True, stderr=subprocess.DEVNULL
-        )
-        with open(ip_cache_path, "w") as f:
-            f.write(local_ip)
+    cert_path, key_path = setup_ssl(base_dir, local_ip)
 
     quest_server = QuestServer(cert_path, key_path)
     quest_server.start()
@@ -139,51 +112,12 @@ def main():
         axis, angle = transforms3d.quaternions.quat2axangle(quat_wxyz)
         return [pos[0], pos[1], pos[2], axis[0]*angle, axis[1]*angle, axis[2]*angle]
         
-    # Nguồn cấp tọa độ từ Kính VR, lấy Widget làm điểm neo (Anchor)
-    def get_robot_fk_as_ur():
-        # Dùng vị trí khớp thật (q_real) để tính FK bằng bộ não CuRobo
-        # Điều này giúp loại bỏ sai lệch Calibration giữa URSim thật và CuRobo URDF
-        q_real = ctrl.joints()
-        fk_dict = teleop._curobo.fk(q_real)
-        pos = fk_dict["pos"]
-        quat_wxyz = fk_dict["quat"]
-        axis, angle = transforms3d.quaternions.quat2axangle(quat_wxyz)
-        return [pos[0], pos[1], pos[2], axis[0]*angle, axis[1]*angle, axis[2]*angle]
-        
+    from teleop_quest.pose_sources import WidgetPoseSource, get_robot_fk_as_ur
     # Nguồn cấp tọa độ từ Kính VR, mỏ neo vào TỌA ĐỘ THỰC TẾ của robot (thông qua CuRobo FK)
     # Scale=1.0 (Tỷ lệ 1:1 giữa tay người và tay máy), alpha=0.1 (nhạy hơn)
-    pose_source = DeltaPoseSource(quest_server, ctrl, scale=1.0, anchor_reference_func=get_robot_fk_as_ur, alpha=0.1)
+    pose_source = DeltaPoseSource(quest_server, ctrl, scale=1.0, anchor_reference_func=lambda: get_robot_fk_as_ur(teleop, ctrl), alpha=0.1)
     
-    # Nguồn cấp tọa độ cho Controller (Đọc từ Widget)
-    class WidgetPoseSource:
-        def __init__(self, alpha=0.12):
-            self.alpha = alpha
-            self._ema_pos = None
-            self._ema_quat_xyzw = None
-            
-        def get_pose(self):
-            import numpy as np
-            target_pos = np.array(target_widget.position)
-            target_quat_wxyz = target_widget.wxyz
-            target_quat_xyzw = np.array([target_quat_wxyz[1], target_quat_wxyz[2], target_quat_wxyz[3], target_quat_wxyz[0]])
-            
-            if self._ema_pos is None:
-                self._ema_pos = target_pos
-                self._ema_quat_xyzw = target_quat_xyzw
-            else:
-                self._ema_pos = self.alpha * target_pos + (1.0 - self.alpha) * self._ema_pos
-                
-                # Slerp/EMA cho Quaternion
-                if np.dot(self._ema_quat_xyzw, target_quat_xyzw) < 0:
-                    target_quat_xyzw = -target_quat_xyzw
-                self._ema_quat_xyzw = self.alpha * target_quat_xyzw + (1.0 - self.alpha) * self._ema_quat_xyzw
-                self._ema_quat_xyzw /= np.linalg.norm(self._ema_quat_xyzw)
-                
-            ema_quat_wxyz = [self._ema_quat_xyzw[3], self._ema_quat_xyzw[0], self._ema_quat_xyzw[1], self._ema_quat_xyzw[2]]
-            
-            return {"pos": self._ema_pos.tolist(), "quat": ema_quat_wxyz}
-            
-    widget_pose_source = WidgetPoseSource()
+    widget_pose_source = WidgetPoseSource(target_widget)
     from safety.singularity_guard.guard_core import SingularityGuard
     guard = SingularityGuard(config)
     

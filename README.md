@@ -44,8 +44,16 @@ ur_ws/curobo_ursim/
 │   ├── runtime_monitor.py           <-- Luồng nền 20Hz giám sát robot
 │   ├── safe_return.py               <-- Hàm tự động thu hồi cánh tay về Home
 │   └── singularity_guard/           <-- Toán học tính toán ma trận Jacobian
-└── teleop/                          <-- Chứa Module tương tác bằng chuột/VR
-    └── teleoperation.py             <-- Bộ điều phối Teleop 
+├── teleop/                          <-- Chứa Module tương tác bằng chuột/VR
+│   └── teleoperation.py             <-- Bộ điều phối Teleop gốc (PC)
+└── teleop_quest/                    <-- Module lõi điều khiển VR trên Meta Quest
+    ├── main_quest.py                <-- File chạy chính cho WebXR & Viser UI
+    ├── quest_server.py              <-- Server HTTPS & WebSockets nhận tín hiệu tay cầm
+    ├── delta_pose_source.py         <-- Nguồn tọa độ chuyển hóa 6DOF từ VR
+    ├── network_utils.py             <-- Quản lý cấu hình IP & tự động cấp SSL Cert
+    ├── pose_sources.py              <-- Xử lý mỏ neo tọa độ, chống rung EMA/Slerp
+    ├── timeout_watchdog.py          <-- E-stop ngắt kết nối tự động nếu mạng rớt
+    └── static/                      <-- Giao diện Dashboard (HTML, JS, CSS)
 ```
 
 ## Luồng Hoạt động Thời gian thực (Main Loop)
