@@ -107,51 +107,77 @@ def validate_joints(q: list) -> bool:
 # URSim helper functions
 # ===========================================================================
 
-def setup_ursim() -> bool:
-    """Power-on robot if POWER_OFF (brake release via dashboard). Returns True when RUNNING."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(2.0)
-        s.connect((ROBOT_IP, DASHBOARD_PORT))
-        time.sleep(0.2)
-        s.recv(4096)
+def setup_ursim(timeout: float = 35.0) -> bool:
+    """Wait for URControl to be ready, then power-on robot and release brakes via Dashboard. Returns True when RUNNING."""
+    start_time = time.time()
+    print("[URSim] Đang kiểm tra trạng thái robot qua Dashboard (Port 29999)...")
 
-        def _cmd(c, w=0.8):
-            s.sendall((c + "\n").encode())
-            time.sleep(w)
+    while time.time() - start_time < timeout:
+        s = None
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(3.0)
+            s.connect((ROBOT_IP, DASHBOARD_PORT))
+            time.sleep(0.3)
             try:
-                s.setblocking(False)
-                r = s.recv(4096).decode().strip()
-                s.setblocking(True)
+                s.recv(4096)
             except Exception:
-                s.setblocking(True)
-                r = ""
-            return r
+                pass
 
-        mode = _cmd("robotmode", 0.3)
-        safety = _cmd("safetystatus", 0.3)
-        print(f"[URSim] Robot mode: {mode}, Safety: {safety}")
+            def _cmd(c, w=0.5):
+                s.sendall((c + "\n").encode())
+                time.sleep(w)
+                try:
+                    s.setblocking(False)
+                    r = s.recv(4096).decode().strip()
+                    s.setblocking(True)
+                except Exception:
+                    s.setblocking(True)
+                    r = ""
+                return r
 
-        if "PROTECTIVE_STOP" in safety or "VIOLATION" in safety or "FAULT" in safety:
-            print("[URSim] Unlocking protective stop...")
-            _cmd("unlock protective stop")
-            _cmd("close safety popup")
-            time.sleep(2.0)
             mode = _cmd("robotmode", 0.3)
+            safety = _cmd("safetystatus", 0.3)
+            print(f"[URSim] Trạng thái: Mode={mode}, Safety={safety}")
 
-        if "POWER_OFF" in mode or "IDLE" in mode:
-            print("[URSim] Powering on and releasing brakes...")
-            _cmd("power on", w=2.0)
-            _cmd("brake release", w=5.0)
-            mode = _cmd("robotmode", 0.5)
-            print(f"[URSim] Mode after: {mode}")
+            if "RUNNING" in mode:
+                s.close()
+                return True
 
-        s.close()
-        return "RUNNING" in mode
-    except Exception as e:
-        print(f"[URSim] Cảnh báo kết nối Dashboard (Port 29999): {e}")
-        print("[URSim] Bỏ qua lỗi Dashboard, giả định robot đã được bật nguồn...")
-        return True
+            if "NO_CONTROLLER" in mode or not mode:
+                print("[URSim] URControl đang khởi động, đợi 3 giây...")
+                s.close()
+                time.sleep(3.0)
+                continue
+
+            if any(err in safety for err in ["PROTECTIVE_STOP", "VIOLATION", "FAULT"]):
+                print("[URSim] Đang mở khoá Protective Stop / Safety popup...")
+                _cmd("unlock protective stop", 1.0)
+                _cmd("close safety popup", 1.0)
+                time.sleep(1.0)
+                mode = _cmd("robotmode", 0.3)
+
+            if "POWER_OFF" in mode or "IDLE" in mode or "DISCONNECTED" in mode:
+                print("[URSim] Đang bật nguồn (power on) và nhả phanh (brake release)...")
+                _cmd("power on", w=2.5)
+                _cmd("brake release", w=4.0)
+                mode = _cmd("robotmode", 0.5)
+                print(f"[URSim] Trạng thái sau kích hoạt: {mode}")
+
+            s.close()
+            if "RUNNING" in mode:
+                return True
+        except Exception as e:
+            if s:
+                try:
+                    s.close()
+                except Exception:
+                    pass
+            print(f"[URSim] Đang kết nối Dashboard ({e})... Thử lại sau 2 giây.")
+            time.sleep(2.0)
+
+    print("[URSim] Lỗi: Hết thời gian chờ URSim chuyển sang trạng thái RUNNING.")
+    return False
 
 
 def send_urscript(script: str, settle: float = 0.3) -> None:

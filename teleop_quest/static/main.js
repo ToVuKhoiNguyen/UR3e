@@ -20,6 +20,7 @@
         let xrSession = null;
         let xrRefSpace = null;
         let glContext = null;
+        let activeHandedness = 'right';
 
         function connectWebSocket() {
             let host = window.location.hostname || '127.0.0.1';
@@ -45,7 +46,7 @@
                     const data = JSON.parse(event.data);
                     if (data.type === 'haptic' && xrSession) {
                         for (let source of xrSession.inputSources) {
-                            if (source.handedness === 'right' && source.gamepad && source.gamepad.hapticActuators && source.gamepad.hapticActuators.length > 0) {
+                            if (source.handedness === activeHandedness && source.gamepad && source.gamepad.hapticActuators && source.gamepad.hapticActuators.length > 0) {
                                 source.gamepad.hapticActuators[0].pulse(data.intensity, data.duration);
                             }
                         }
@@ -99,12 +100,23 @@
         
         btnToggleUI.addEventListener('click', () => {
             uiLocked = !uiLocked;
+            
+            // Báo cho Python server biết trạng thái Drive Mode
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'ui_state',
+                    drive_mode: uiLocked
+                }));
+            }
+            
             if (uiLocked) {
-                cockpitBody.style.pointerEvents = 'none';
+                document.getElementById('vr-overlay').style.pointerEvents = 'none';
+                btnToggleUI.style.pointerEvents = 'auto'; // Cho phép bấm lại nút này
+                btnExitVR.style.pointerEvents = 'auto'; // Cho phép bấm exit
                 btnToggleUI.innerHTML = 'Unlock UI (Edit Mode)';
                 btnToggleUI.style.background = '#4CAF50';
             } else {
-                cockpitBody.style.pointerEvents = 'auto';
+                document.getElementById('vr-overlay').style.pointerEvents = 'auto';
                 btnToggleUI.innerHTML = 'Lock UI (Drive Mode)';
                 btnToggleUI.style.background = '#f59e0b';
             }
@@ -179,21 +191,40 @@
 
             let sentData = false;
 
+            let activeSource = null;
+            // Ưu tiên tay phải
             for (let source of session.inputSources) {
-                // Bỏ qua điểm nhìn bằng mắt/đầu (gaze)
                 if (source.targetRayMode === 'gaze') continue;
+                if (!source.gripSpace && !source.targetRaySpace) continue;
+                if (source.handedness === 'right') {
+                    activeSource = source;
+                    break;
+                }
+            }
+            // Nếu không có tay phải thì lấy tay trái
+            if (!activeSource) {
+                for (let source of session.inputSources) {
+                    if (source.targetRayMode === 'gaze') continue;
+                    if (!source.gripSpace && !source.targetRaySpace) continue;
+                    if (source.handedness === 'left') {
+                        activeSource = source;
+                        break;
+                    }
+                }
+            }
 
-                let space = source.gripSpace || source.targetRaySpace;
-                if (!space) continue;
-
+            if (activeSource) {
+                activeHandedness = activeSource.handedness;
+                let space = activeSource.gripSpace || activeSource.targetRaySpace;
                 let pose = frame.getPose(space, xrRefSpace);
+                
                 if (pose) {
                     let triggerPressed = false;
                     let gripPressed = false;
                     
-                    if (source.gamepad && source.gamepad.buttons) {
-                        if (source.gamepad.buttons.length > 0) triggerPressed = source.gamepad.buttons[0].pressed;
-                        if (source.gamepad.buttons.length > 1) gripPressed = source.gamepad.buttons[1].pressed;
+                    if (activeSource.gamepad && activeSource.gamepad.buttons) {
+                        if (activeSource.gamepad.buttons.length > 0) triggerPressed = activeSource.gamepad.buttons[0].pressed;
+                        if (activeSource.gamepad.buttons.length > 1) gripPressed = activeSource.gamepad.buttons[1].pressed;
                     }
 
                     let pos = pose.transform.position;
@@ -201,14 +232,14 @@
 
                     ws.send(JSON.stringify({
                         t: Date.now() / 1000.0,
-                        hand: source.handedness || "unknown",
+                        hand: activeSource.handedness || "unknown",
                         pos: [pos.x, pos.y, pos.z],
                         quat: [quat.w, quat.x, quat.y, quat.z],
                         trigger: triggerPressed,
                         grip: gripPressed
                     }));
                     
-                    let handName = source.handedness === 'right' ? "Right Hand" : (source.handedness === 'left' ? "Left Hand" : "Unknown");
+                    let handName = activeSource.handedness === 'right' ? "Right Hand" : (activeSource.handedness === 'left' ? "Left Hand" : "Unknown");
                     
                     // Cập nhật dữ liệu lên URSim Layout
                     elValSource.innerText = handName;
@@ -229,7 +260,6 @@
                     elValQw.innerText = quat.w.toFixed(4);
                     
                     sentData = true;
-                    break;
                 }
             }
 

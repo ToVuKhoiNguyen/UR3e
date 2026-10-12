@@ -109,6 +109,8 @@ class QuestServer:
                         with self._lock:
                             if data.get("type") == "estop":
                                 self._estop_triggered = True
+                            elif data.get("type") == "ui_state":
+                                self._drive_mode = data.get("drive_mode", False)
                             else:
                                 self._latest_frame = data
                                 self._last_seen = time.time()
