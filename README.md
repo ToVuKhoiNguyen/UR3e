@@ -1,4 +1,4 @@
-# UR3e Teleoperation & Motion Planning System
+# UR3e Teleoperation via Meta Quest 3S
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![Robotics](https://img.shields.io/badge/Robot-UR3e-orange)
