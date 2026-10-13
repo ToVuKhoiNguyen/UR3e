@@ -16,7 +16,8 @@ class GraspSimulator:
         self.tomato_pos = self.pick_init_pos.copy()
         self.is_grasped = False
         self.placed_count = 0
-        self.grasp_distance_threshold = 0.07  # 7cm
+        # Ngưỡng khoảng cách gắp 12cm (tính từ mặt bích tool0 nơi gắn camera tới ngón kẹp gắp quả cà chua)
+        self.grasp_distance_threshold = 0.12  # 12cm
         
         # 1. Sinh quả cà chua 3D (Khối cầu đỏ 🍅)
         self.tomato_mesh = self.server.scene.add_icosphere(

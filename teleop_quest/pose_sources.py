@@ -10,6 +10,10 @@ class WidgetPoseSource:
         
     def get_pose(self):
         target_pos = np.array(self.target_widget.position)
+        # Giới hạn an toàn không gian làm việc (giữ Z >= 0.11m bảo vệ cụm camera cổ tay không va đập mặt bàn)
+        target_pos[0] = np.clip(target_pos[0], -0.50, 0.50)
+        target_pos[1] = np.clip(target_pos[1], -0.50, 0.50)
+        target_pos[2] = np.clip(target_pos[2],  0.11, 0.65)
         target_quat_wxyz = self.target_widget.wxyz
         target_quat_xyzw = np.array([target_quat_wxyz[1], target_quat_wxyz[2], target_quat_wxyz[3], target_quat_wxyz[0]])
         

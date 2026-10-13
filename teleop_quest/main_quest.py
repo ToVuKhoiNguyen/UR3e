@@ -208,6 +208,17 @@ def main():
             poll_sleep=POLL_SLEEP
         )
 
+    @ui.btn_snap.on_click
+    def _on_btn_snap_click(_):
+        fk_snap = teleop._curobo.fk(ctrl.joints())
+        ui.target_widget.position = fk_snap["pos"]
+        ui.target_widget.wxyz = fk_snap["quat"]
+        widget_pose_source._ema_pos = None
+        widget_pose_source._ema_quat_xyzw = None
+        pose_source.out_of_reach_time = 0.0
+        ui.set_status("Đã thu hồi trục XYZ")
+        print("[Snap] Đã thu hồi trục XYZ về vị trí thực tế của robot.")
+
     # Xử lý tín hiệu tắt an toàn
     def handle_sigint(sig, frame):
         print("\n[Hệ thống] Đang tắt an toàn...")
@@ -287,17 +298,17 @@ def main():
                     ui.target_widget.position = vr_pose["pos"]
                     ui.target_widget.wxyz = vr_pose["quat"]
                     pose_source.out_of_reach_time = 0.0
-                elif quest_server.is_connected():
-                    # Chỉ tự động thu hồi nếu kính VR đang kết nối mà bị thả cò kẹt xa robot
-                    is_stuck = "ngoai tam voi" in status_low or "dung vat can" in status_low or "singularity" in status_low
+                else:
+                    # Tự động thu hồi trục XYZ khi kẹt ngoài tầm với / vướng vật cản (hoạt động cho cả Chuột và VR)
+                    is_stuck = "ngoai tam voi" in status_low or "dung vat can" in status_low or "singularity" in status_low or "tu the ket" in status_low
                     pose_source.out_of_reach_time = (pose_source.out_of_reach_time + POLL_SLEEP) if is_stuck else 0.0
-                    if pose_source.out_of_reach_time > 2.0:
+                    if pose_source.out_of_reach_time > 1.5:
                         ui.target_widget.position = fk_res["pos"]
                         ui.target_widget.wxyz = fk_res["quat"]
                         widget_pose_source._ema_pos = None
                         widget_pose_source._ema_quat_xyzw = None
                         pose_source.out_of_reach_time = 0.0
-                # Nếu không kết nối VR: Người dùng dùng Chuột kéo tự do Widget trên màn hình Viser!
+                        print(f"[Auto-Snap] Trục tọa độ bị kẹt ({current_status}). Tự động thu hồi về tay máy!")
 
                 # Đồng bộ dáng robot ảo trên Viser
                 ui.update_robot_state(q_real)

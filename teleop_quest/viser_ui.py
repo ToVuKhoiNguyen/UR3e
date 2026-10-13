@@ -68,6 +68,7 @@ class TeleopViserUI:
             self.cb_record = self.server.gui.add_checkbox("Record AI Episode", initial_value=False)
             self.btn_discard = self.server.gui.add_button("Discard Episode (Lỗi/Rơi)")
             self.btn_home = self.server.gui.add_button("Go to Home")
+            self.btn_snap = self.server.gui.add_button("📍 Thu hồi trục XYZ về tay máy")
             self.ui_grasp_state = self.server.gui.add_text("Grasp", initial_value="Empty", disabled=True)
             self.ui_episodes = self.server.gui.add_text("Saved Episodes", initial_value="0", disabled=True)
             self.ui_status = self.server.gui.add_text("Status", initial_value="Waiting...", disabled=True)
