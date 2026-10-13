@@ -237,6 +237,7 @@ def main():
     print("=" * 40 + "\n")
 
     _last_teleop_state = False
+    _frame_count = 0
 
     # 7. Vòng lặp điều khiển chính (20Hz)
     while True:
@@ -298,17 +299,22 @@ def main():
                     ui.target_widget.position = vr_pose["pos"]
                     ui.target_widget.wxyz = vr_pose["quat"]
                     pose_source.out_of_reach_time = 0.0
-                else:
-                    # Tự động thu hồi trục XYZ khi kẹt ngoài tầm với / vướng vật cản (hoạt động cho cả Chuột và VR)
+                elif quest_server.is_connected():
+                    # Kính VR đang kết nối nhưng người dùng thả cò:
+                    # Tự động thu hồi nếu thả cò khi đang ở ngoài tầm với hoặc kẹt tư thế
                     is_stuck = "ngoai tam voi" in status_low or "dung vat can" in status_low or "singularity" in status_low or "tu the ket" in status_low
                     pose_source.out_of_reach_time = (pose_source.out_of_reach_time + POLL_SLEEP) if is_stuck else 0.0
-                    if pose_source.out_of_reach_time > 1.5:
+                    if pose_source.out_of_reach_time > 2.0:
                         ui.target_widget.position = fk_res["pos"]
                         ui.target_widget.wxyz = fk_res["quat"]
                         widget_pose_source._ema_pos = None
                         widget_pose_source._ema_quat_xyzw = None
                         pose_source.out_of_reach_time = 0.0
-                        print(f"[Auto-Snap] Trục tọa độ bị kẹt ({current_status}). Tự động thu hồi về tay máy!")
+                        print(f"[Auto-Snap VR] Kính VR thả cò kẹt ngoài tầm với. Tự động thu hồi về tay máy!")
+                else:
+                    # Chế độ CHUỘT: Tuyệt đối KHÔNG tự động ghi đè target_widget vì sẽ giật chuột và xung đột với người dùng.
+                    # Người dùng kéo thả tự do; nếu cần thu hồi, người dùng có nút bấm "📍 Thu hồi trục XYZ về tay máy".
+                    pose_source.out_of_reach_time = 0.0
 
                 # Đồng bộ dáng robot ảo trên Viser
                 ui.update_robot_state(q_real)
@@ -341,8 +347,10 @@ def main():
                     gripper_closed=is_grip_pressed
                 )
 
-                # Cập nhật ảnh trực tiếp lên sidebar Viser để người dùng quan sát bằng mắt (kèm OSD cho người nhìn)
-                ui.update_cam_preview(wrist_cam.add_osd_preview(cam_img, is_grip_pressed))
+                # Cập nhật ảnh trực tiếp lên sidebar Viser để quan sát (~6.7 FPS để không gây nghẽn WebSocket tương tác 3D)
+                _frame_count += 1
+                if _frame_count % 3 == 0:
+                    ui.update_cam_preview(wrist_cam.add_osd_preview(cam_img, is_grip_pressed))
 
                 # Ghi dữ liệu HDF5 phục vụ huấn luyện AI (kèm ảnh Wrist Camera mô phỏng 3D)
                 if logger.is_recording:

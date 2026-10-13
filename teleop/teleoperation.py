@@ -297,11 +297,10 @@ class TeleoperationController:
         # Không dùng PyRoki làm fallback nữa vì PyRoki sẽ phớt lờ vật cản.
         if result_cu["q"] is not None:
             q_target = result_cu["q"]
-            
-            # Kiểm tra bước nhảy góc khớp (phát hiện nhảy nhánh IK do gần điểm kỳ dị Singularity)
+            # Kiểm tra bước nhảy nhánh IK bất thường (phát hiện lật khớp do gần điểm kỳ dị Singularity)
             if self._last_valid_q is not None:
                 max_jump = max(abs(q_target[i] - self._last_valid_q[i]) for i in range(6))
-                if max_jump > 0.4:  # ~23 độ
+                if max_jump > 1.2:  # ~70 độ (chỉ chặn khi xảy ra đảo nhánh IK đột ngột)
                     with self._lock:
                         self._status = "Tu the ket (Loi van xoan khop) - Dung im"
                     return
