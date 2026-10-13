@@ -178,7 +178,84 @@ Hệ thống sẽ hiển thị các cổng truy cập:
 
 ---
 
-## 5. Kiểm Thử Hệ Thống & Quản Lý Dữ Liệu
+## 5. Hướng Dẫn Triển Khai Trên Cánh Tay Robot UR3e Thực Tế
+
+### 5.1. Kết Nối Phần Cứng & Cấu Hình Mạng LAN
+1. **Cắm cáp mạng LAN:** Kết nối trực tiếp từ cổng mạng của máy tính (PC chạy code) vào cổng mạng trên hộp điều khiển UR Control Box (hoặc qua Switch mạng nội bộ).
+2. **Cài đặt IP tĩnh trên Robot (qua màn hình Teach Pendant - PolyScope):**
+   - Vào menu: **Settings** $\rightarrow$ **System** $\rightarrow$ **Network**.
+   - Chọn **Static Address**:
+     - IP Address: ví dụ `192.168.1.100`
+     - Subnet Mask: `255.255.255.0`
+     - Default Gateway: `192.168.1.1`
+   - Bấm **Apply** và xác nhận trạng thái mạng hiển thị *Network is connected*.
+3. **Cài đặt IP trên máy tính điều khiển (PC):**
+   - Cài đặt IP máy tính cùng dải mạng: ví dụ `192.168.1.50`, Subnet Mask `255.255.255.0`.
+   - Kiểm tra kết nối mạng từ terminal máy tính:
+     ```bash
+     ping 192.168.1.100
+     ```
+
+### 5.2. Thiết Lập Trên Tay Dạy PolyScope (Teach Pendant)
+1. **Bật chế độ Remote Control:**
+   - Ở góc trên cùng bên phải màn hình PolyScope, chuyển chế độ từ **Local** sang **Remote Control**.
+2. **Cài đặt Tải trọng Đầu Gắp (Payload & Center of Gravity - CoG):**
+   - Vào **Installation** $\rightarrow$ **General** $\rightarrow$ **Payload**.
+   - Cài đặt chính xác khối lượng ngàm kẹp + camera (ví dụ Robotiq 2F-85 + RealSense $\approx 1.1$kg) và tọa độ trọng tâm CoG.
+   - *Lưu ý:* Khai báo đúng tải trọng giúp thuật toán `servoJ` vận hành êm ái, bám quỹ đạo chuẩn và tránh lỗi quá dòng động cơ.
+3. **Bật nguồn và Nhả phanh:**
+   - Kích hoạt nguồn (Power On) và bấm **Release Brakes** để robot vào trạng thái sẵn sàng hoạt động.
+4. **Hạ thanh trượt Tốc độ (Speed Slider):**
+   - Trong lần đầu vận hành, kéo thanh trượt tốc độ ở góc dưới màn hình PolyScope xuống mức **10% – 20%** để đảm bảo an toàn quan sát.
+5. **Cầm sẵn nút dừng khẩn cấp (Emergency Stop):**
+   - Luôn cầm Teach Pendant trên tay và sẵn sàng ấn nút E-Stop màu đỏ nếu robot có hiện tượng di chuyển sai hướng.
+
+### 5.3. Cấu Hình Địa Chỉ IP Trong Mã Nguồn
+Hệ thống hỗ trợ cấu hình IP linh hoạt qua biến môi trường `ROBOT_IP` hoặc chỉnh sửa trực tiếp:
+
+- **Cách 1: Sử dụng biến môi trường (Khuyến nghị, không cần sửa file):**
+  ```bash
+  export ROBOT_IP=192.168.1.100
+  python3 main.py
+  ```
+- **Cách 2: Cập nhật trực tiếp trong file mã nguồn:**
+  - `core/curobo_ursim_control.py`: Cập nhật `ROBOT_IP = "192.168.1.100"`.
+  - `teleop/teleoperation.py`: Cập nhật `ROBOT_IP = "192.168.1.100"` trong `ServoJExecutor`.
+  - `config/singularity.yaml`: Cập nhật `rtde_ip: 192.168.1.100`.
+
+### 5.4. Khai Báo Không Gian Vật Cản Thực Tế (Collision Scene)
+File `assets/obstacle_scene.yml` định nghĩa ranh giới an toàn cho thuật toán GPU CuRobo:
+1. Đo khoảng cách thực tế từ gốc robot (`base_link`) tới mặt bàn làm việc (thường $Z = 0.0$ hoặc $-0.02$m).
+2. Nếu có chướng ngại vật cố định xung quanh bàn, đo kích thước `[dx, dy, dz]` và tọa độ tâm `[x, y, z]`, sau đó khai báo vào `assets/obstacle_scene.yml` để CuRobo tự động né tránh va chạm trong thời gian thực.
+
+### 5.5. Tích Hợp Ngàm Kẹp Vật Lý & Camera Thật
+1. **Ngàm kẹp thật (Ví dụ: Robotiq 2F-85 / 2F-140 / OnRobot):**
+   - Kết nối qua giao tiếp RS-485 / Modbus RTU tại cổng Tool Flange của UR3e hoặc cổng USB máy tính.
+   - Trong `teleop_quest/main_quest.py`, thay thế đoạn xử lý `grasp_sim.update(...)` bằng lệnh đóng/mở ngàm kẹp thật mỗi khi trạng thái nút `is_grip_pressed` thay đổi.
+2. **Camera thật (Ví dụ: Intel RealSense D435i / D405 gắn cổ tay):**
+   - Kết nối camera qua cáp USB 3.0 vào máy tính.
+   - Sử dụng thư viện `pyrealsense2` hoặc `cv2.VideoCapture` để đọc luồng ảnh màu RGB (640x480) thực tế thay cho `wrist_cam.render()`.
+   - Ảnh thật sẽ được tự động truyền về khung nhìn WebXR Cockpit và lưu vào tập dữ liệu HDF5.
+
+### 5.6. Quy Trình Vận Hành Thử Nghiệm An Toàn Lần Đầu
+1. **Khởi chạy chương trình:**
+   ```bash
+   cd /home/nguyen/ur_ws/curobo_ursim
+   source ~/curobo/.venv/bin/activate
+   export ROBOT_IP=192.168.1.100
+   python3 main.py
+   ```
+2. **Kiểm tra trạng thái kết nối:**
+   - Đảm bảo terminal hiển thị `[Setup] Connected` và `[ServoJ] RTDEControl connected: True`.
+   - Mở giao diện `http://localhost:8080`, kiểm tra góc khớp của mô hình 3D trên màn hình khớp hoàn toàn với vị trí robot thực tế.
+3. **Thử nghiệm chuyển động biên độ nhỏ:**
+   - Giữ nguyên tốc độ PolyScope ở mức **10%**.
+   - Sử dụng chuột kéo nhẹ Widget 3D trên Viser hoặc dùng tay cầm Meta Quest dịch chuyển nhẹ khoảng **2 – 3 cm** theo trục Z.
+   - Xác nhận cánh tay robot thật di chuyển đúng hướng, êm ái và không bị giật cục trước khi tăng dần thanh tốc độ lên mức bình thường.
+
+---
+
+## 6. Kiểm Thử Hệ Thống & Quản Lý Dữ Liệu
 
 ### 1. Kiểm thử tự động Gắp Cà chua & Xuất HDF5
 Chạy kiểm thử toàn bộ chu trình gắp thả và lưu dữ liệu:
@@ -226,7 +303,7 @@ Kiểm tra toàn vẹn các episode: xác minh không có giá trị `NaN`/`Inf`
 
 ---
 
-## 6. Thông Số Kỹ Thuật Điều Khiển Chính
+## 7. Thông Số Kỹ Thuật Điều Khiển Chính
 
 | Tham số | Giá trị | Giải thích kỹ thuật |
 | :--- | :--- | :--- |

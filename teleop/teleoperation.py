@@ -1,3 +1,4 @@
+import os
 import time
 import threading
 import numpy as np
@@ -76,7 +77,7 @@ class SafetyGate:
 #   không bị gián đoạn giữa các lần gọi.
 #
 class ServoJExecutor:
-    ROBOT_IP = "127.0.0.1"
+    ROBOT_IP = os.environ.get("ROBOT_IP", "127.0.0.1")
 
     def __init__(self, dt=0.05, lookahead_time=0.04, gain=800):
         self._dt = dt

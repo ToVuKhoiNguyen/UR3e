@@ -24,7 +24,7 @@ import rtde_receive
 # ===========================================================================
 # Configuration
 # ===========================================================================
-ROBOT_IP        = "127.0.0.1"
+ROBOT_IP        = os.environ.get("ROBOT_IP", "127.0.0.1")
 _BASE_DIR       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROBOT_CONFIG    = os.path.join(_BASE_DIR, "assets", "ur3e_custom.yml")
 TCP_LINK        = "tool0"          # End-effector link defined in ur3e.yml
