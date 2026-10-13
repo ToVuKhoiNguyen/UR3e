@@ -21,17 +21,22 @@ class SyntheticWristCamera:
 
     def render(
         self,
-        tool_pos: Union[list, np.ndarray],
+        tool_pos: Optional[Union[list, np.ndarray]] = None,
         tool_quat: Optional[Union[list, np.ndarray]] = None,
         tomato_pos: Optional[np.ndarray] = None,
         basket_pos: Optional[np.ndarray] = None,
-        gripper_closed: bool = False
+        gripper_closed: bool = False,
+        tcp_pose: Optional[Union[list, np.ndarray]] = None,
+        **kwargs
     ) -> np.ndarray:
         """
         Render khung cảnh 3D từ góc nhìn của TCP sang ảnh RGB (uint8).
-        tool_pos: [x, y, z] trong hệ tọa độ CuRobo world (hoặc [x, y, z, rx, ry, rz] nếu cũ)
+        tool_pos/tcp_pose: [x, y, z] trong hệ tọa độ CuRobo world (hoặc [x, y, z, rx, ry, rz] nếu cũ)
         tool_quat: [w, x, y, z] Quaternion từ CuRobo FK (hoặc None nếu truyền tcp_pose cũ)
         """
+        if tool_pos is None and tcp_pose is not None:
+            tool_pos = tcp_pose
+
         # Xử lý tương thích ngược nếu truyền kiểu cũ render(tcp_pose, tomato_pos, basket_pos, ...)
         if tool_quat is not None and not isinstance(tool_quat, (list, tuple, np.ndarray)):
             # Trường hợp gọi theo cú pháp cũ: (tcp_pose, tomato_pos, basket_pos, gripper_closed)
@@ -129,11 +134,18 @@ class SyntheticWristCamera:
         cv2.rectangle(img, (int(self.cx + offset_x), self.height - finger_h),
                       (int(self.cx + offset_x + finger_w), self.height), (70, 75, 80), -1)
 
-        # 5. OSD thông tin trạng thái
-        cv2.putText(img, "EYE-IN-HAND CAMERA (SIMULATION)", (15, 25),
+        return img
+
+    def add_osd_preview(self, img_rgb: np.ndarray, gripper_closed: bool = False) -> np.ndarray:
+        """
+        Tạo bản sao ảnh có gắn nhãn OSD chỉ để hiển thị trực quan lên Viser UI.
+        KHÔNG dùng ảnh này để nạp vào DataLogger/HDF5 (tránh ô nhiễm dữ liệu AI).
+        """
+        annotated = img_rgb.copy()
+        cv2.putText(annotated, "EYE-IN-HAND CAMERA (SIMULATION)", (15, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (50, 50, 50), 1)
         grip_str = "GRIPPER: CLOSED [1.0]" if gripper_closed else "GRIPPER: OPEN [0.0]"
-        cv2.putText(img, grip_str, (15, 45),
+        cv2.putText(annotated, grip_str, (15, 45),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 140, 0) if gripper_closed else (120, 120, 120), 1)
+        return annotated
 
-        return img

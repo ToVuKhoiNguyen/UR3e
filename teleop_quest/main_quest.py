@@ -317,8 +317,8 @@ def main():
                     gripper_closed=is_grip_pressed
                 )
 
-                # Cập nhật ảnh trực tiếp lên sidebar Viser để người dùng quan sát bằng mắt
-                ui.update_cam_preview(cam_img)
+                # Cập nhật ảnh trực tiếp lên sidebar Viser để người dùng quan sát bằng mắt (kèm OSD cho người nhìn)
+                ui.update_cam_preview(wrist_cam.add_osd_preview(cam_img, is_grip_pressed))
 
                 # Ghi dữ liệu HDF5 phục vụ huấn luyện AI (kèm ảnh Wrist Camera mô phỏng 3D)
                 if logger.is_recording:
