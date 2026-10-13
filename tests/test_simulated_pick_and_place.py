@@ -5,12 +5,16 @@ Cách chạy:
   /home/nguyen/curobo/.venv/bin/python test_simulated_pick_and_place.py
 """
 
+import sys
 import os
 import time
 import h5py
 import numpy as np
 import cv2
 import viser
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BASE_DIR)
 
 from teleop_quest.grasp_simulator import GraspSimulator
 from teleop_quest.synthetic_camera import SyntheticWristCamera
@@ -80,7 +84,7 @@ def main():
             images={"wrist_camera": frame_rgb}
         )
 
-        status_str = "DÍNH CÀ CHUA 🍅" if is_holding else "RỖNG"
+        status_str = "DÍNH CÀ CHUA" if is_holding else "RỖNG"
         print(f"  Step {i+1}: {desc} | Trạng thái: {status_str} | Sự kiện: {event}")
         time.sleep(0.05)
 

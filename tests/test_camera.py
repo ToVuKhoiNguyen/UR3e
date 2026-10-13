@@ -17,14 +17,15 @@ import argparse
 import cv2
 import numpy as np
 
-# Thêm thư mục hiện tại vào PYTHONPATH
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Them thu muc goc vao PYTHONPATH
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BASE_DIR)
 
 from teleop_quest.synthetic_camera import SyntheticWristCamera
 
 def test_camera_render():
     print("=" * 60)
-    print(" 🍅 KIỂM TRA WRIST CAMERA (MÔ PHỎNG 3D EYE-IN-HAND) ")
+    print("Kiểm tra Wrist Camera (Mô phỏng 3D Eye-in-Hand) ")
     print("=" * 60)
 
     # 1. Khởi tạo Camera ảo (RealSense D435i - 640x480, FOV 65 độ)
@@ -60,7 +61,7 @@ def test_camera_render():
         cv2.imwrite(save_path, img_bgr)
         print(f" -> {desc:30s} | Tọa độ 3D: [{tomato_pos[0]:.3f}, {tomato_pos[1]:.3f}, {tomato_pos[2]:.3f}] -> Lưu tại: {save_path}")
 
-    print("\n✅ Đã render thành công cả 4 trường hợp! Bạn có thể xem các file ảnh trong thư mục 'logs/'.")
+    print("Đã render thành công cả 4 trường hợp! Bạn có thể xem các file ảnh trong thư mục 'logs/'.")
     print("=" * 60)
 
 def test_interactive_gui():
@@ -68,7 +69,7 @@ def test_interactive_gui():
     import viser
     import subprocess
     print("=" * 60)
-    print(" 🍅 KHỞI ĐỘNG GIAO DIỆN TEST CAMERA TƯƠNG TÁC TRÊN VISER ")
+    print("KHỞI ĐỘNG GIAO DIỆN TEST CAMERA TƯƠNG TÁC TRÊN VISER ")
     print("=" * 60)
 
     subprocess.run("fuser -k 8089/tcp 2>/dev/null", shell=True)
@@ -96,7 +97,7 @@ def test_interactive_gui():
     with server.gui.add_folder("Điều chỉnh vị trí Cà chua"):
         slider_x = server.gui.add_slider("Tọa độ X (Trái / Phải)", min=-0.40, max=0.40, step=0.01, initial_value=float(tool_pos[0]))
         slider_y = server.gui.add_slider("Tọa độ Y (Gần / Xa)", min=0.10, max=0.60, step=0.01, initial_value=float(tool_pos[1]))
-        btn_center = server.gui.add_button("📍 Đặt ngay dưới đầu gắp")
+        btn_center = server.gui.add_button("Đặt ngay dưới đầu gắp")
 
     with server.gui.add_folder("Wrist Camera Live Preview"):
         init_frame = cam.render(tool_pos, tool_quat, np.array([tool_pos[0], tool_pos[1], 0.035]), basket_pos)
@@ -122,9 +123,9 @@ def test_interactive_gui():
         slider_y.value = float(tool_pos[1])
         update_view()
 
-    print("\n👉 Mở trình duyệt truy cập: http://localhost:8089")
-    print("👉 Kéo các thanh trượt 'Tọa độ X' và 'Tọa độ Y' để xem quả cà chua di chuyển trên bàn 3D và trực tiếp trên camera!")
-    print("👉 Nhấn Ctrl+C để kết thúc.\n")
+    print("Mở trình duyệt truy cập: http://localhost:8089")
+    print("Kéo các thanh trượt 'Tọa độ X' và 'Tọa độ Y' để xem quả cà chua di chuyển trên bàn 3D và trực tiếp trên camera!")
+    print("Nhấn Ctrl+C để kết thúc.\n")
 
     try:
         while True:

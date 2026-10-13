@@ -22,6 +22,7 @@ class QuestServer:
         self._active_ws = None
         self._loop = None
         self._estop_triggered = False
+        self._latest_jpeg = None
 
     def start(self):
         # Khởi động HTTPS server (chạy daemon thread)
@@ -66,16 +67,59 @@ class QuestServer:
             except Exception:
                 pass
 
+    def send_camera_frame(self, frame_rgb, quality: int = 55):
+        """Mã hóa frame ảnh RGB thành JPEG base64 và gửi tới client WebXR qua WebSocket."""
+        with self._lock:
+            ws = self._active_ws
+            loop = self._loop
+        try:
+            import cv2
+            import base64
+            # Resize ảnh cho luồng stream VR 320x240 để siêu nhẹ (chỉ ~8KB/frame)
+            small = cv2.resize(frame_rgb, (320, 240))
+            bgr = cv2.cvtColor(small, cv2.COLOR_RGB2BGR)
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+            success, encimg = cv2.imencode('.jpg', bgr, encode_param)
+            if success:
+                jpeg_bytes = encimg.tobytes()
+                with self._lock:
+                    self._latest_jpeg = jpeg_bytes
+                if ws and loop:
+                    b64_str = base64.b64encode(jpeg_bytes).decode('utf-8')
+                    msg = json.dumps({"type": "camera", "image": b64_str})
+                    asyncio.run_coroutine_threadsafe(ws.send(msg), loop)
+        except Exception:
+            pass
+
     def _run_http(self):
         # Cấu hình HTTPServer
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(self.cert, self.key)
 
         static_dir = os.path.join(os.path.dirname(__file__), "static")
+        server_self = self
 
         class RequestHandler(http.server.SimpleHTTPRequestHandler):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=static_dir, **kwargs)
+
+            def do_GET(self):
+                if self.path == "/wrist_camera.jpg":
+                    with server_self._lock:
+                        jpeg_bytes = server_self._latest_jpeg
+                    if jpeg_bytes:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "image/jpeg")
+                        self.send_header("Content-Length", str(len(jpeg_bytes)))
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                        self.end_headers()
+                        self.wfile.write(jpeg_bytes)
+                        return
+                    else:
+                        self.send_response(404)
+                        self.end_headers()
+                        return
+                super().do_GET()
 
             def log_message(self, format, *args):
                 pass  # Tắt log mặc định để tránh spam terminal

@@ -3,7 +3,7 @@ from typing import Tuple, Optional
 
 class GraspSimulator:
     """
-    Mô phỏng gắp nhặt vật thể ảo 3D (Quả cà chua 🍅) trong Viser:
+    Mô phỏng gắp nhặt vật thể ảo 3D (Quả cà chua) trong Viser:
       - Spawns quả cà chua và khay chứa trong không gian 3D.
       - Cơ chế Kinematic/Magnetic Grasping: hút dính quả cà chua khi đầu gắp chạm gần và bóp cò Grip.
       - Thả quả cà chua vào khay chứa khi nhả Grip.
@@ -16,10 +16,10 @@ class GraspSimulator:
         self.tomato_pos = self.pick_init_pos.copy()
         self.is_grasped = False
         self.placed_count = 0
-        # Ngưỡng khoảng cách gắp 12cm (tính từ mặt bích tool0 nơi gắn camera tới ngón kẹp gắp quả cà chua)
-        self.grasp_distance_threshold = 0.12  # 12cm
+        # Ngưỡng khoảng cách gắp 9.5cm (kết hợp với điều kiện hạ thấp Z để gắp chính xác)
+        self.grasp_distance_threshold = 0.095  # 9.5cm
         
-        # 1. Sinh quả cà chua 3D (Khối cầu đỏ 🍅)
+        # 1. Sinh quả cà chua 3D (Khối cầu đỏ)
         self.tomato_mesh = self.server.scene.add_icosphere(
             "/world/tomato",
             radius=0.032,
@@ -34,12 +34,28 @@ class GraspSimulator:
             position=(self.tomato_pos[0], self.tomato_pos[1], self.tomato_pos[2] + 0.032)
         )
 
-        # 2. Sinh chiếc khay/giỏ đựng (Khối hộp xanh dương 🧺)
+        # 2. Sinh chiếc khay/giỏ đựng (Khối hộp xanh dương)
         self.basket_mesh = self.server.scene.add_box(
             "/world/basket",
             dimensions=(0.15, 0.15, 0.03),
             color=(60, 150, 230),
             position=tuple(self.place_basket_pos)
+        )
+
+        # 3. Sinh mặt bàn làm việc 3D (Gỗ xám nhạt) nằm trong tầm với của tay máy
+        self.table_mesh = self.server.scene.add_box(
+            "/world/table",
+            dimensions=(0.75, 0.80, 0.04),
+            color=(185, 175, 160),
+            position=(0.20, 0.0, -0.02)
+        )
+
+        # 4. Sinh vật cản vách ngăn 3D (đồng bộ với CuRobo obstacle_scene.yml)
+        self.wall_mesh = self.server.scene.add_box(
+            "/world/obstacles/wall",
+            dimensions=(0.025, 0.08, 0.10),
+            color=(230, 130, 40),
+            position=(0.25, 0.0, 0.05)
         )
 
     def set_position(self, x: float, y: float, z: float = 0.035):
@@ -59,10 +75,13 @@ class GraspSimulator:
         if not self.is_grasped:
             # Chưa gắp: Kiểm tra khoảng cách tới quả cà chua
             dist = np.linalg.norm(tool_p - self.tomato_pos)
-            if dist < self.grasp_distance_threshold and grip_pressed:
+            dist_xy = np.linalg.norm(tool_p[:2] - self.tomato_pos[:2])
+            # Cho phép gắp khi khoảng cách 3D < 9cm HOẶC căn chuẩn tâm XY < 5.5cm và đã hạ thấp Z < 13cm
+            can_grasp = (dist < self.grasp_distance_threshold) or (dist_xy < 0.055 and tool_p[2] < 0.13)
+            if can_grasp and grip_pressed:
                 self.is_grasped = True
                 event = "GRASP_SUCCESS"
-                print(f"[GraspSim] ĐÃ GẮP QUẢ CÀ CHUA! (Khoảng cách: {dist*100:.1f}cm)")
+                print(f"[GraspSim] ĐÃ GẮP QUẢ CÀ CHUA! (Khoảng cách: {dist*100:.1f}cm, lệch XY: {dist_xy*100:.1f}cm)")
         else:
             # Đang gắp:
             if grip_pressed:

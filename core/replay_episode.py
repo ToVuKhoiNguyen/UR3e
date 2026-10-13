@@ -48,9 +48,9 @@ def replay_episode(hdf5_path: str, execute_robot: bool = False, robot_ip: str = 
         print(f"-> Bước nhảy góc khớp lớn nhất: {max_joint_jump:.4f} rad (~{np.degrees(max_joint_jump):.1f}°)")
         print(f"-> Vận tốc khớp ước lượng tối đa: {max_joint_vel:.2f} rad/s")
         if max_joint_vel > 2.0:
-            print(f"⚠️ CẢNH BÁO: Vận tốc khớp vượt 2.0 rad/s (Có thể gây giật robot thật)!")
+            print(f"[CẢNH BÁO] Vận tốc khớp vượt 2.0 rad/s (Có thể gây giật robot thật)!")
         else:
-            print("✅ Quỹ đạo mượt mà, nằm trong giới hạn an toàn.")
+            print("[OK] Quỹ đạo mượt mà, nằm trong giới hạn an toàn.")
 
     # 2. Chạy trên robot / URSim nếu yêu cầu
     if execute_robot:
@@ -92,12 +92,12 @@ def replay_episode(hdf5_path: str, execute_robot: bool = False, robot_ip: str = 
 
             avg_err = np.mean(tracking_errors)
             max_err = np.max(tracking_errors)
-            print(f"\n✅ REPLAY HOÀN TẤT TRÊN ROBOT!")
+            print(f"\n[OK] REPLAY HOÀN TẤT TRÊN ROBOT!")
             print(f"-> Sai lệch bám vị trí trung bình: {avg_err*1000:.2f} mm/mrad")
             print(f"-> Sai lệch lớn nhất:              {max_err*1000:.2f} mm/mrad")
 
         except Exception as e:
-            print(f"❌ Không thể kết nối hoặc thực thi trên robot ({e}).")
+            print(f"[LỖI] Không thể kết nối hoặc thực thi trên robot ({e}).")
             print("Gợi ý: Đảm bảo URSim container đang chạy và Dashboard ở chế độ RUNNING.")
             return False
     else:

@@ -5,7 +5,7 @@ class DeltaPoseSource:
     Implements PoseSource contract.
     Chuyển delta tọa độ từ kính Quest sang base_link của UR3e.
     """
-    def __init__(self, server, ctrl, scale: float = 1.0, max_delta_m: float = 0.05, anchor_reference_func=None, alpha: float = 0.15):
+    def __init__(self, server, ctrl, scale: float = 1.0, max_delta_m: float = 0.25, anchor_reference_func=None, alpha: float = 0.35):
         self.server = server
         self.ctrl = ctrl
         self.scale = scale
@@ -36,6 +36,7 @@ class DeltaPoseSource:
         self._ema_quat_xyzw = None
         
         self._last_button_state = 0
+        self.out_of_reach_time = 0.0
 
     def get_pose(self):
         frame = self.server.get_frame()
@@ -112,20 +113,15 @@ class DeltaPoseSource:
             # --- BỘ LỌC CHỐNG NHIỄU & CHẨN ĐOÁN ---
             delta_mag = np.linalg.norm(delta_q_world)
             
-            if delta_mag < 0.015:  # Deadband tĩnh 1.5cm
+            if delta_mag < 0.005:  # Deadband tĩnh 0.5cm (5mm)
                 delta_q_world = np.zeros(3)
             else:
                 # SOFT DEADBAND: Khử độ nhảy vọt khi vượt ngưỡng
-                delta_q_world = delta_q_world * ((delta_mag - 0.015) / delta_mag)
+                delta_q_world = delta_q_world * ((delta_mag - 0.005) / delta_mag)
                 
                 abs_delta = np.abs(delta_q_world)
                 max_axis = np.argmax(abs_delta)
                 
-                # Tỷ lệ snapping 60%: Hỗ trợ người dùng kéo đường thẳng tắp theo 1 trục
-                for i in range(3):
-                    if i != max_axis and abs_delta[i] < 0.6 * abs_delta[max_axis]:
-                        delta_q_world[i] = 0.0
-                        
                 # Chẩn đoán (Không gian WebXR: +X Phải, +Y Lên, +Z Lùi về phía người dùng)
                 if max_axis == 1:
                     direction_word = "LÊN TRÊN" if delta_q_world[max_axis] > 0 else "XUỐNG DƯỚI"
@@ -157,7 +153,7 @@ class DeltaPoseSource:
         # Workspace safety clamp (Hardcoded UR3e safe zone)
         target_pos[0] = np.clip(target_pos[0], -0.50, 0.50) # X
         target_pos[1] = np.clip(target_pos[1], -0.50, 0.50) # Y
-        target_pos[2] = np.clip(target_pos[2],  0.05, 0.60) # Z (min 5cm above table)
+        target_pos[2] = np.clip(target_pos[2], -0.02, 0.60) # Z (an toàn sát mặt bàn)
 
         if self._ema_pos is None:
             self._ema_pos = target_pos
@@ -186,7 +182,7 @@ class DeltaPoseSource:
             
             # --- BỘ LỌC DEADBAND XOAY CỔ TAY (SOFT ROTATION DEADBAND) ---
             angle_rad = R_delta_hand_local.magnitude()
-            rot_deadband = 0.20  # ~11.5 độ
+            rot_deadband = 0.06  # ~3.4 độ (êm ái, nhạy bén)
             if angle_rad < rot_deadband:
                 R_delta_hand_local = R.identity()
             else:
@@ -249,4 +245,11 @@ class DeltaPoseSource:
             return None
 
     def reset_anchor(self):
-        self._last_trigger = False
+        self._last_button_state = 0
+        self._anchor_pos_quest = None
+        self._anchor_quat_quest_xyzw = None
+        self._anchor_tcp = None
+        self._anchor_quat_robot_xyzw = None
+        self._ema_pos = None
+        self._ema_quat_xyzw = None
+        self.out_of_reach_time = 0.0

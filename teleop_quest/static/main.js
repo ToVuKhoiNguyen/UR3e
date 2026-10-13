@@ -51,8 +51,19 @@
                                 source.gamepad.hapticActuators[0].pulse(data.intensity, data.duration);
                             }
                         }
+                    } else if (data.type === 'camera' && data.image) {
+                        lastCamUpdate = Date.now();
+                        const camImg = document.getElementById('wrist-cam-img');
+                        const placeholder = document.getElementById('cam-placeholder');
+                        if (camImg) {
+                            camImg.src = 'data:image/jpeg;base64,' + data.image;
+                            camImg.style.display = 'block';
+                        }
+                        if (placeholder) {
+                            placeholder.style.display = 'none';
+                        }
                     }
-                } catch (e) { console.error("Haptic error", e); }
+                } catch (e) { console.error("WS error", e); }
             };
 
             ws.onclose = () => {
@@ -286,6 +297,28 @@
                 // console.log("Missing pose: ", debugStr);
             }
         }
+
+        // Quản lý luồng stream camera ảo cổ tay
+        let lastCamUpdate = 0;
+        const wristCamImg = document.getElementById('wrist-cam-img');
+        const camPlaceholder = document.getElementById('cam-placeholder');
+
+        // Định kỳ lấy ảnh camera qua HTTP nếu WebSocket chưa gửi (ví dụ ở màn hình chờ hoặc xem trên PC)
+        setInterval(() => {
+            if (Date.now() - lastCamUpdate > 800) {
+                const pollImg = new Image();
+                pollImg.onload = () => {
+                    if (wristCamImg) {
+                        wristCamImg.src = pollImg.src;
+                        wristCamImg.style.display = 'block';
+                    }
+                    if (camPlaceholder) {
+                        camPlaceholder.style.display = 'none';
+                    }
+                };
+                pollImg.src = `/wrist_camera.jpg?t=${Date.now()}`;
+            }
+        }, 150);
 
         // Start
         connectWebSocket();

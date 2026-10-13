@@ -76,7 +76,7 @@ def verify_dataset(dataset_dir="logs/ai_training_data", max_dt_std_ms=10.0):
                     
                     status_flag = "OK"
                     if dt_std > max_dt_std_ms:
-                        status_flag = f"⚠️ Cảnh báo dt_std={dt_std:.1f}ms > {max_dt_std_ms}ms"
+                        status_flag = f"[CẢNH BÁO] dt_std={dt_std:.1f}ms > {max_dt_std_ms}ms"
                         issues.append(f"[{rel_path}] CẢNH BÁO: Tần số giật cục (dt={dt_mean:.1f}±{dt_std:.1f}ms, min={dt_min}ms, max={dt_max}ms)")
                 else:
                     dt_mean, dt_std = 0.0, 0.0
@@ -88,16 +88,16 @@ def verify_dataset(dataset_dir="logs/ai_training_data", max_dt_std_ms=10.0):
 
         except Exception as e:
             issues.append(f"[{rel_path}] LỖI ĐỌC FILE: {e}")
-            print(f"[{idx+1:02d}/{total_episodes:02d}] {rel_path:35s} | ❌ LỖI: {e}")
+            print(f"[{idx+1:02d}/{total_episodes:02d}] {rel_path:35s} | [LỖI]: {e}")
 
     print("=" * 70)
     print(f"TỔNG KẾT: {passed_episodes}/{total_episodes} episodes đã quét | Tổng frames: {total_frames}")
     if not issues:
-        print("✅ TẤT CẢ DỮ LIỆU ĐẠT CHUẨN (Không có NaN, độ dài đồng bộ 100%, timestamp đều)!")
+        print("[OK] TẤT CẢ DỮ LIỆU ĐẠT CHUẨN (Không có NaN, độ dài đồng bộ 100%, timestamp đều)!")
         print("=" * 70)
         return True
     else:
-        print(f"⚠️ PHÁT HIỆN {len(issues)} VẤN ĐỀ CẦN LƯU Ý:")
+        print(f"[CẢNH BÁO] PHÁT HIỆN {len(issues)} VẤN ĐỀ CẦN LƯU Ý:")
         for iss in issues:
             print(f"  - {iss}")
         print("=" * 70)

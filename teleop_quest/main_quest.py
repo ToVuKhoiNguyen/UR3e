@@ -30,7 +30,6 @@ from teleop_quest.pose_sources import WidgetPoseSource, get_robot_fk_as_ur
 from teleop_quest.timeout_watchdog import TimeoutWatchdog
 from teleop_quest.viser_ui import TeleopViserUI
 from teleop_quest.home_planner import HomePlanner
-from teleop_quest.camera_worker import CameraWorker
 from teleop_quest.grasp_simulator import GraspSimulator
 from teleop_quest.synthetic_camera import SyntheticWristCamera
 
@@ -55,9 +54,6 @@ def main():
     quest_server = QuestServer(cert_path, key_path)
     quest_server.start()
 
-    # Khởi động Camera Worker (30 FPS ngầm)
-    cam = CameraWorker(camera_id=0, name="wrist_camera")
-    cam.start()
 
     # 2. Khởi động Controller Robot, An toàn & Data Logger
     print("[Hệ thống] Đang kết nối CuRobo và URSim...")
@@ -78,9 +74,9 @@ def main():
     robot_init_pos = fk_init["pos"]
     robot_init_quat = fk_init["quat"]
 
-    # Đặt quả cà chua ban đầu ngay phía dưới/trước đầu gắp robot trên mặt bàn
-    pick_pos = (robot_init_pos[0], robot_init_pos[1], 0.035)
-    place_pos = (robot_init_pos[0] + 0.20, robot_init_pos[1] - 0.20, 0.02)
+    # Đặt quả cà chua và khay chứa trong tầm với tối ưu của UR3e (Bán kính 25cm - 32cm)
+    pick_pos = (0.22, 0.22, 0.035)
+    place_pos = (0.20, -0.20, 0.02)
 
     # Khởi tạo Giao diện Viser 3D
     ui = TeleopViserUI(
@@ -101,7 +97,6 @@ def main():
     executor = ServoJExecutor(dt=POLL_SLEEP)
     teleop = TeleoperationController(
         pose_source=widget_pose_source,
-        pyroki_solver=None,
         curobo_solver=curobo_solver,
         safety_gate=SafetyGate(guard=guard),
         executor=executor
@@ -110,7 +105,8 @@ def main():
     pose_source = DeltaPoseSource(
         quest_server, ctrl, scale=1.0,
         anchor_reference_func=lambda: get_robot_fk_as_ur(teleop, ctrl),
-        alpha=0.1
+        alpha=0.35,
+        max_delta_m=0.25
     )
 
     # 5. Khởi tạo bộ giám sát mất kết nối & Home Planner
@@ -150,56 +146,6 @@ def main():
             ui.cb_record.value = False
             ui.set_status("Discarded Episode")
 
-    @ui.btn_reset_object.on_click
-    def _on_btn_reset_object(_):
-        grasp_sim.reset()
-        ui.cb_gripper.value = False
-        ui.set_grasp_state(False)
-        ui.slider_tomato_x.value = round(float(grasp_sim.tomato_pos[0]), 3)
-        ui.slider_tomato_y.value = round(float(grasp_sim.tomato_pos[1]), 3)
-
-    # Callback điều khiển vị trí Quả Cà Chua qua Slider & Nút Preset
-    @ui.slider_tomato_x.on_update
-    def _on_tomato_x_update(_):
-        if not grasp_sim.is_grasped:
-            grasp_sim.set_position(ui.slider_tomato_x.value, ui.slider_tomato_y.value)
-
-    @ui.slider_tomato_y.on_update
-    def _on_tomato_y_update(_):
-        if not grasp_sim.is_grasped:
-            grasp_sim.set_position(ui.slider_tomato_x.value, ui.slider_tomato_y.value)
-
-    @ui.btn_preset_under_tool.on_click
-    def _on_preset_under_tool(_):
-        if not grasp_sim.is_grasped:
-            fk = teleop._curobo.fk(ctrl.joints())
-            new_x = round(float(fk["pos"][0]), 3)
-            new_y = round(float(fk["pos"][1]), 3)
-            ui.slider_tomato_x.value = new_x
-            ui.slider_tomato_y.value = new_y
-            grasp_sim.set_position(new_x, new_y)
-
-    @ui.btn_preset_front.on_click
-    def _on_preset_front(_):
-        if not grasp_sim.is_grasped:
-            ui.slider_tomato_x.value = 0.15
-            ui.slider_tomato_y.value = 0.35
-            grasp_sim.set_position(0.15, 0.35)
-
-    @ui.btn_preset_left.on_click
-    def _on_preset_left(_):
-        if not grasp_sim.is_grasped:
-            new_x = max(-0.40, round(float(ui.slider_tomato_x.value - 0.10), 3))
-            ui.slider_tomato_x.value = new_x
-            grasp_sim.set_position(new_x, ui.slider_tomato_y.value)
-
-    @ui.btn_preset_right.on_click
-    def _on_preset_right(_):
-        if not grasp_sim.is_grasped:
-            new_x = min(0.40, round(float(ui.slider_tomato_x.value + 0.10), 3))
-            ui.slider_tomato_x.value = new_x
-            grasp_sim.set_position(new_x, ui.slider_tomato_y.value)
-
     @ui.btn_home.on_click
     def _on_btn_home_click(_):
         home_planner.go_home(
@@ -208,22 +154,12 @@ def main():
             poll_sleep=POLL_SLEEP
         )
 
-    @ui.btn_snap.on_click
-    def _on_btn_snap_click(_):
-        fk_snap = teleop._curobo.fk(ctrl.joints())
-        ui.target_widget.position = fk_snap["pos"]
-        ui.target_widget.wxyz = fk_snap["quat"]
-        widget_pose_source._ema_pos = None
-        widget_pose_source._ema_quat_xyzw = None
-        pose_source.out_of_reach_time = 0.0
-        ui.set_status("Đã thu hồi trục XYZ")
-        print("[Snap] Đã thu hồi trục XYZ về vị trí thực tế của robot.")
+
 
     # Xử lý tín hiệu tắt an toàn
     def handle_sigint(sig, frame):
         print("\n[Hệ thống] Đang tắt an toàn...")
         teleop.enabled = False
-        cam.stop()
         time.sleep(0.5)
         ctrl.close()
         sys.exit(0)
@@ -270,13 +206,25 @@ def main():
                 executor.disconnect()
                 watchdog.disarm()
 
-        # D. Điều khiển thời gian thực khi Teleop bật
-        if teleop.enabled:
-            try:
-                q_real = ctrl.joints()
-                fk_res = teleop._curobo.fk(q_real)
+        # D. Lấy trạng thái góc khớp và FK của robot thực tế
+        try:
+            q_real = ctrl.joints()
+            fk_res = teleop._curobo.fk(q_real)
+        except Exception:
+            q_real = None
+            fk_res = None
 
-                # Thực thi bước điều khiển Teleop
+        is_grip_pressed = False
+
+        if teleop.enabled and fk_res is not None:
+            try:
+                # Cập nhật tọa độ từ VR vào Widget 3D ngay trước khi giải IK (giảm tối đa độ trễ)
+                vr_pose = pose_source.get_pose()
+                if vr_pose is not None:
+                    ui.target_widget.position = vr_pose["pos"]
+                    ui.target_widget.wxyz = vr_pose["quat"]
+
+                # Thực thi bước điều khiển Teleop (Widget -> CuRobo IK -> RTDE ServoJ)
                 teleop.step(q_real)
                 current_status = teleop.get_status()
                 status_low = current_status.lower()
@@ -286,6 +234,10 @@ def main():
                     ui.set_status("IK Error")
                 elif "ngoai tam voi" in status_low or "out of reach" in status_low:
                     ui.set_status("Out of Reach")
+                elif "van xoan" in status_low or "vặn xoắn" in status_low or "tu the ket" in status_low:
+                    ui.set_status("Tư thế kẹt (Vặn xoắn)")
+                elif "vat can" in status_low or "vật cản" in status_low:
+                    ui.set_status("Vướng vật cản")
                 elif "singularity" in status_low or "kì dị" in status_low:
                     ui.set_status("Singularity")
                 elif "sigma=" in status_low or "curobo" in status_low:
@@ -293,37 +245,39 @@ def main():
                 else:
                     ui.set_status(current_status.split("|")[0].strip())
 
-                # Cập nhật tọa độ từ VR vào Widget 3D (nếu có kính VR)
-                vr_pose = pose_source.get_pose()
-                if vr_pose is not None:
-                    ui.target_widget.position = vr_pose["pos"]
-                    ui.target_widget.wxyz = vr_pose["quat"]
-                    pose_source.out_of_reach_time = 0.0
-                elif quest_server.is_connected():
-                    # Kính VR đang kết nối nhưng người dùng thả cò:
-                    # Tự động thu hồi nếu thả cò khi đang ở ngoài tầm với hoặc kẹt tư thế
-                    is_stuck = "ngoai tam voi" in status_low or "dung vat can" in status_low or "singularity" in status_low or "tu the ket" in status_low
-                    pose_source.out_of_reach_time = (pose_source.out_of_reach_time + POLL_SLEEP) if is_stuck else 0.0
-                    if pose_source.out_of_reach_time > 2.0:
-                        ui.target_widget.position = fk_res["pos"]
-                        ui.target_widget.wxyz = fk_res["quat"]
-                        widget_pose_source._ema_pos = None
-                        widget_pose_source._ema_quat_xyzw = None
-                        pose_source.out_of_reach_time = 0.0
-                        print(f"[Auto-Snap VR] Kính VR thả cò kẹt ngoài tầm với. Tự động thu hồi về tay máy!")
+                # Kiểm tra trạng thái lỗi vặn xoắn và vướng vật cản
+                is_twisting = any(err in status_low for err in ["van xoan", "vặn xoắn", "tu the ket", "tư thế kẹt", "twist"])
+                is_obstacle = any(err in status_low for err in ["vat can", "vật cản", "dung vat can", "đụng vật cản", "obstacle"])
+                is_stuck = is_twisting or is_obstacle or any(err in status_low for err in [
+                    "ngoai tam voi", "ngoài tầm với", "out of reach",
+                    "singularity", "wrist_clamp", "that bai", "thất bại", "fail", "ik error"
+                ])
+
+                # Khi bị lỗi tư thế vặn xoắn hoặc vướng vật cản kéo dài: tự động đưa XYZ về đầu tay máy
+                snap_threshold = 1.2 if (is_twisting or is_obstacle) else 1.8
+                if is_stuck:
+                    pose_source.out_of_reach_time += POLL_SLEEP
+                    quest_server.send_haptic(intensity=0.8, duration=80)
                 else:
-                    # Chế độ CHUỘT: Tuyệt đối KHÔNG tự động ghi đè target_widget vì sẽ giật chuột và xung đột với người dùng.
-                    # Người dùng kéo thả tự do; nếu cần thu hồi, người dùng có nút bấm "📍 Thu hồi trục XYZ về tay máy".
                     pose_source.out_of_reach_time = 0.0
 
-                # Đồng bộ dáng robot ảo trên Viser
-                ui.update_robot_state(q_real)
+                if pose_source.out_of_reach_time >= snap_threshold:
+                    ui.target_widget.position = fk_res["pos"]
+                    ui.target_widget.wxyz = fk_res["quat"]
+                    widget_pose_source._ema_pos = None
+                    widget_pose_source._ema_quat_xyzw = None
+                    if hasattr(pose_source, "_anchor_pos_quest"):
+                        pose_source._anchor_pos_quest = None
+                        pose_source._anchor_tcp = None
+                        pose_source._ema_pos = None
+                        pose_source._ema_quat_xyzw = None
+                        pose_source._last_button_state = 0
+                    pose_source.out_of_reach_time = 0.0
+                    ui.set_status("Tự động thu hồi XYZ")
+                    quest_server.send_haptic(intensity=1.0, duration=200)
+                    print(f"[Auto-Snap] Lỗi vặn xoắn / vướng vật cản ({current_status}) -> Tự động thu hồi XYZ về đầu tay máy!")
 
-                # Rung phản hồi lực khi có lỗi hoặc vướng singularity
-                if "thất bại" in status_low or "cảnh báo" in status_low or "singularity" in status_low:
-                    quest_server.send_haptic(intensity=1.0, duration=150)
-
-                # Cập nhật logic gắp thả vật thể 3D (Cà chua 🍅): Độc lập nút Gripper (nút A/X) với Clutch xoay (Grip)
+                # Cập nhật logic gắp thả vật thể 3D (Cà chua): Độc lập nút Gripper (nút A/X) với Clutch xoay (Grip)
                 vr_frame = quest_server.get_frame()
                 vr_gripper = 1.0 if (vr_frame and (vr_frame.get("gripper_btn", False) or vr_frame.get("button_a", False))) else 0.0
                 mouse_grip = 1.0 if ui.cb_gripper.value else 0.0
@@ -334,25 +288,11 @@ def main():
                 ui.set_grasp_state(is_holding)
 
                 if grasp_event == "GRASP_SUCCESS":
-                    quest_server.send_haptic(0.9, 150) # Rung tay cầm báo đã gắp trúng
+                    quest_server.send_haptic(0.9, 150)
                 elif grasp_event == "PLACE_SUCCESS":
-                    quest_server.send_haptic(0.5, 300) # Rung nhẹ báo đã thả trúng giỏ
+                    quest_server.send_haptic(0.5, 300)
 
-                # Render góc nhìn từ Camera ảo trên cổ tay robot (Wrist Eye-in-Hand theo CuRobo FK)
-                cam_img = wrist_cam.render(
-                    tool_pos=fk_res["pos"],
-                    tool_quat=fk_res["quat"],
-                    tomato_pos=grasp_sim.tomato_pos,
-                    basket_pos=grasp_sim.place_basket_pos,
-                    gripper_closed=is_grip_pressed
-                )
-
-                # Cập nhật ảnh trực tiếp lên sidebar Viser để quan sát (~6.7 FPS để không gây nghẽn WebSocket tương tác 3D)
-                _frame_count += 1
-                if _frame_count % 3 == 0:
-                    ui.update_cam_preview(wrist_cam.add_osd_preview(cam_img, is_grip_pressed))
-
-                # Ghi dữ liệu HDF5 phục vụ huấn luyện AI (kèm ảnh Wrist Camera mô phỏng 3D)
+                # Ghi dữ liệu HDF5 phục vụ huấn luyện AI
                 if logger.is_recording:
                     q_target_cmd = teleop._last_valid_q if teleop._last_valid_q is not None else q_real
                     logger.log_step(
@@ -362,15 +302,37 @@ def main():
                         q_target=q_target_cmd,
                         gripper_actual=grip_val,
                         gripper_target=grip_val,
-                        images={"wrist_camera": cam_img},
+                        images={"wrist_camera": cam_img if 'cam_img' in locals() else None},
                     )
 
             except Exception as e:
                 ui.set_status(f"Lỗi: {e}")
                 print(f"[Lỗi Điều khiển] {e}")
                 traceback.print_exc()
-        else:
+        elif not teleop.enabled:
             ui.set_status("Tắt")
+
+        # E. Cập nhật giao diện 3D và Luồng Camera trực tiếp (Luôn chạy bất kể Teleop bật hay tắt)
+        if fk_res is not None:
+            # Đồng bộ dáng robot thực tế lên Viser 3D
+            ui.update_robot_state(q_real)
+
+            # Render góc nhìn từ Camera ảo gắn cổ tay robot (Wrist Eye-in-Hand) ở 10 FPS
+            _frame_count += 1
+            if _frame_count % 2 == 0:
+                current_grip = is_grip_pressed if teleop.enabled else bool(ui.cb_gripper.value)
+                cam_img = wrist_cam.render(
+                    tool_pos=fk_res["pos"],
+                    tool_quat=fk_res["quat"],
+                    tomato_pos=grasp_sim.tomato_pos,
+                    basket_pos=grasp_sim.place_basket_pos,
+                    gripper_closed=current_grip
+                )
+                preview_frame = wrist_cam.add_osd_preview(cam_img, current_grip)
+                # 1. Cập nhật khung xem trước trên sidebar Viser
+                ui.update_cam_preview(preview_frame)
+                # 2. Phát luồng trực tiếp sang khung CAMERA STREAM trên VR Dashboard
+                quest_server.send_camera_frame(preview_frame)
 
         # Bù trừ thời gian trễ thực tế để duy trì chính xác tần số 20Hz (50ms/bước)
         elapsed = time.perf_counter() - loop_start_time

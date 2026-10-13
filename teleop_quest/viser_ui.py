@@ -64,35 +64,13 @@ class TeleopViserUI:
         with self.server.gui.add_folder("VR / Chuột Teleoperation"):
             self.cb_teleop = self.server.gui.add_checkbox("Bật Điều Khiển (Teleop)", initial_value=False)
             self.cb_gripper = self.server.gui.add_checkbox("Gripper (Bóp Kẹp)", initial_value=False)
-            self.btn_reset_object = self.server.gui.add_button("Reset Cà chua 🍅")
             self.cb_record = self.server.gui.add_checkbox("Record AI Episode", initial_value=False)
             self.btn_discard = self.server.gui.add_button("Discard Episode (Lỗi/Rơi)")
             self.btn_home = self.server.gui.add_button("Go to Home")
-            self.btn_snap = self.server.gui.add_button("📍 Thu hồi trục XYZ về tay máy")
             self.ui_grasp_state = self.server.gui.add_text("Grasp", initial_value="Empty", disabled=True)
             self.ui_episodes = self.server.gui.add_text("Saved Episodes", initial_value="0", disabled=True)
             self.ui_status = self.server.gui.add_text("Status", initial_value="Waiting...", disabled=True)
             self.ui_conn = self.server.gui.add_text("VR Connected", initial_value="No", disabled=True)
-
-        with self.server.gui.add_folder("Vị trí Cà chua 🍅 (Test Camera)"):
-            self.slider_tomato_x = self.server.gui.add_slider(
-                "Tọa độ X (Trái / Phải)",
-                min=-0.40,
-                max=0.40,
-                step=0.01,
-                initial_value=float(init_tomato_pos[0])
-            )
-            self.slider_tomato_y = self.server.gui.add_slider(
-                "Tọa độ Y (Gần / Xa)",
-                min=0.10,
-                max=0.60,
-                step=0.01,
-                initial_value=float(init_tomato_pos[1])
-            )
-            self.btn_preset_under_tool = self.server.gui.add_button("📍 Đặt ngay dưới đầu gắp")
-            self.btn_preset_front = self.server.gui.add_button("🍅 Phía trước (+15cm, +35cm)")
-            self.btn_preset_left = self.server.gui.add_button("⬅️ Dịch trái (-10cm)")
-            self.btn_preset_right = self.server.gui.add_button("➡️ Dịch phải (+10cm)")
 
         with self.server.gui.add_folder("Wrist Camera Live Preview"):
             init_img = np.full((180, 240, 3), 200, dtype=np.uint8)
@@ -122,4 +100,4 @@ class TeleopViserUI:
         self.ui_episodes.value = str(count)
 
     def set_grasp_state(self, is_grasped: bool):
-        self.ui_grasp_state.value = "Holding 🍅" if is_grasped else "Empty"
+        self.ui_grasp_state.value = "Holding" if is_grasped else "Empty"

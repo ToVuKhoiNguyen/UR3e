@@ -108,7 +108,7 @@ class SyntheticWristCamera:
             cv2.putText(img, "Basket", (u_b - 25, v_b - h_box // 2 - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (40, 100, 180), 1)
 
-        # 3. Vẽ quả cà chua đỏ 🍅
+        # 3. Vẽ quả cà chua đỏ
         u_t, v_t, z_t = project_point(tomato_pos)
         if u_t is not None and -100 <= u_t < self.width + 100 and -100 <= v_t < self.height + 100:
             rad = max(8, int(self.fx * 0.032 / z_t))

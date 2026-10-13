@@ -259,6 +259,8 @@ button {
     color: #94a3b8;
     font-size: 16px;
     font-weight: 500;
+    overflow: hidden;
+    position: relative;
 }
 
 #viser-view {

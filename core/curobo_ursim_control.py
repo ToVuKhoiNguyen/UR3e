@@ -1,26 +1,12 @@
-#!/usr/bin/env python3
 """
 cuRobo v0.8 -> URSim UR3e Controller
 ======================================
 Pipeline:
-  cuRobo GPU (IK) -> best joint solution -> URScript (port 30002) -> URSim
+  cuRobo GPU (IK) -> best joint solution -> RTDE servoJ / URScript -> URSim
   RTDEReceive (port 30004) -> real-time state monitoring
-
-Usage:
-  cd ~/curobo && source .venv/bin/activate
-  python3 ~/ur_ws/curobo_ursim/curobo_ursim_control.py --demo joints
-  python3 ~/ur_ws/curobo_ursim/curobo_ursim_control.py --demo ik
-  python3 ~/ur_ws/curobo_ursim/curobo_ursim_control.py --demo batch_ik
-
-Key design choices:
-  - Uses port 30002 (URScript secondary interface) instead of RTDEControlInterface
-    so Polyscope "Remote Control" mode is NOT required.
-  - IK returns multiple seeds (return_seeds=5) then picks the solution closest
-    to the current joint state, minimising travel distance and avoiding timeouts.
-  - IK joint angles are also normalised (mod 2pi) to the equivalent nearest
-    to the current position.
 """
 
+import os
 import math
 import socket
 import time
@@ -30,7 +16,6 @@ import torch
 
 # -- cuRobo v0.8 API ---------------------------------------------------------
 from curobo.inverse_kinematics import InverseKinematics, InverseKinematicsCfg
-from curobo.motion_planner import MotionPlanner, MotionPlannerCfg
 from curobo.types import GoalToolPose, Pose, JointState
 
 # -- ur-rtde -----------------------------------------------------------------
@@ -40,7 +25,8 @@ import rtde_receive
 # Configuration
 # ===========================================================================
 ROBOT_IP        = "127.0.0.1"
-ROBOT_CONFIG    = "/home/nguyen/ur_ws/curobo_ursim/assets/ur3e_custom.yml"
+_BASE_DIR       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROBOT_CONFIG    = os.path.join(_BASE_DIR, "assets", "ur3e_custom.yml")
 TCP_LINK        = "tool0"          # End-effector link defined in ur3e.yml
 
 SECONDARY_PORT  = 30002            # URScript secondary interface
@@ -207,7 +193,7 @@ class CuRoboIK:
     the least joint travel from the current robot state.
     """
 
-    def __init__(self, num_seeds: int = 20, return_seeds: int = IK_RETURN_SEEDS, scene_file: Optional[str] = None):
+    def __init__(self, num_seeds: int = 64, return_seeds: int = 16, scene_file: Optional[str] = None):
         print(f"[cuRobo] Initializing IK solver for UR3e (scene: {scene_file})...")
         if scene_file:
             self.cfg = InverseKinematicsCfg.create(
@@ -277,7 +263,10 @@ class CuRoboIK:
                 skipped += 1
                 continue
 
-            dist = sum(abs(norm_q[j] - ref_q[j]) for j in range(6))
+            max_diff = max(abs(norm_q[j] - ref_q[j]) for j in range(6))
+            # Ưu tiên các nghiệm cùng nhánh động học liên tục (tránh đảo nhánh vặn xoắn cổ tay)
+            branch_penalty = 50.0 if max_diff > 0.8 else 0.0
+            dist = sum(abs(norm_q[j] - ref_q[j]) for j in range(6)) + branch_penalty
             if dist < best_dist:
                 best_dist, best = dist, norm_q
 
@@ -288,23 +277,19 @@ class CuRoboIK:
 
 
 # ===========================================================================
-# cuRobo v0.8 Motion Planner
-# ===========================================================================
-
-# ===========================================================================
 # High-Level Controller
 # ===========================================================================
 
 class CuRoboURSim:
     """
-    cuRobo GPU IK -> URSim via URScript.
+    cuRobo GPU IK -> URSim via URScript / RTDE.
 
     Architecture:
         cuRobo IK  (GPU, returns N seeds)
              |
              | pick closest solution to current joints + normalise angles
              v
-        URScript -> port 30002 -> URSim UR3e
+        RTDEControl / URScript -> URSim UR3e
              |
         RTDEReceive <- joint state feedback (port 30004)
     """
@@ -323,7 +308,6 @@ class CuRoboURSim:
         print(f"[Setup] Connected. Joints: {[round(j, 4) for j in q]}")
 
         self._ik = None
-        self._mp = None
         self.scene_file = scene_file
         print("=" * 56 + "\n")
 

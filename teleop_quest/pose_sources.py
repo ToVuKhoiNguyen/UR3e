@@ -2,7 +2,7 @@ import numpy as np
 
 class WidgetPoseSource:
     """Nguồn cấp tọa độ cho Controller (Đọc từ Widget)"""
-    def __init__(self, target_widget, alpha=0.6):
+    def __init__(self, target_widget, alpha=0.85):
         self.target_widget = target_widget
         self.alpha = alpha
         self._ema_pos = None
@@ -10,10 +10,10 @@ class WidgetPoseSource:
         
     def get_pose(self):
         target_pos = np.array(self.target_widget.position)
-        # Giới hạn không gian làm việc an toàn (Z >= 0.02m cho phép gắp cà chua ở Z=0.035m, bàn ở Z=0.0m được bảo vệ bởi CuRobo collision)
-        target_pos[0] = np.clip(target_pos[0], -0.60, 0.60)
-        target_pos[1] = np.clip(target_pos[1], -0.60, 0.60)
-        target_pos[2] = np.clip(target_pos[2],  0.12, 0.70)
+        # Giới hạn không gian làm việc an toàn trong tầm với của UR3e (bán kính <= 45cm, Z >= -0.02m)
+        target_pos[0] = np.clip(target_pos[0], -0.45, 0.45)
+        target_pos[1] = np.clip(target_pos[1], -0.45, 0.45)
+        target_pos[2] = np.clip(target_pos[2], -0.02, 0.55)
         target_quat_wxyz = self.target_widget.wxyz
         target_quat_xyzw = np.array([target_quat_wxyz[1], target_quat_wxyz[2], target_quat_wxyz[3], target_quat_wxyz[0]])
         

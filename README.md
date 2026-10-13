@@ -1,152 +1,242 @@
-# UR3e Teleoperation via Meta Quest 3S
+# UR3e Teleoperation via Meta Quest 3S & CuRobo GPU IK
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Robotics](https://img.shields.io/badge/Robot-UR3e-orange)
-![Framework](https://img.shields.io/badge/Framework-CuRobo%20%7C%20PyRoki-green)
-![Status](https://img.shields.io/badge/Status-Active-brightgreen)
+Hệ thống điều khiển viễn thao thời gian thực (Real-time Teleoperation) cho cánh tay robot công nghiệp Universal Robots UR3e sử dụng kính thực tế ảo Meta Quest 3S (WebXR) và giao diện Web 3D Viser. Hệ thống giải động học nghịch (Inverse Kinematics) và kiểm tra va chạm hoàn toàn trên GPU bằng NVIDIA CuRobo, đồng thời hỗ trợ thu thập dữ liệu trình diễn (Demonstrations) chuẩn HDF5 phục vụ huấn luyện mô hình Robot AI (Imitation Learning, Diffusion Policy, ACT).
 
-Một hệ thống điều khiển tay máy công nghiệp UR3e toàn diện, kết hợp giữa **Điều khiển viễn thao thời gian thực (Real-time Teleoperation)** và **Tự hành né chướng ngại vật (Motion Planning)**. Dự án được tối ưu hóa bằng GPU và thiết kế theo kiến trúc Module chuẩn công nghiệp.
+---
 
-## Tính năng Nổi bật (Key Features)
+## 1. Tinh Nang Noi Bat
 
-- **Zero-Latency Teleoperation:** Sử dụng giao thức mạng RTDE (`servoJ` ở 20Hz) cho phép người dùng điều khiển robot bám theo trục tọa độ (Target Widget) trên giao diện Web mà gần như không có độ trễ.
-- **Hybrid Dual-IK Solver:** Kiến trúc lai kết hợp sức mạnh của **CuRobo** (né vật cản cứng) và **PyRoki** (JAX-based Oracle kiểm tra tầm với) giúp chẩn đoán chính xác robot đang bị *vướng tường* hay *với không tới*.
-- **Auto Motion Planning:** Khi thao tác teleop bị vướng vật cản, chỉ cần nhả chuột, khối Trajectory Planner sẽ tự động thức dậy, vẽ quỹ đạo uốn lượn vượt chướng ngại vật và nội suy lệnh `movej` đẩy robot về đích an toàn.
-- **Lớp bảo vệ Động cơ Tối cao (Safety Gate):**
-  - **Chống vặn xoắn (Anti-Twist):** Ngăn chặn hiện tượng nhảy nhánh IK (Jump Branch) > 0.4 rad, bảo vệ hộp số động cơ khỏi các cú giật bất ngờ do giới hạn hình học.
-  - **Kẹp Vận Tốc (Rate Limiter):** Giới hạn phần mềm delta góc khớp luôn dưới 1.5 rad/s, triệt tiêu lỗi *Protective Stop* từ tủ điều khiển vật lý.
-  - **Mở khóa Không gian (Full Range Unlock):** Khai thác tối đa thông số nhà sản xuất (quay $\pm 360^\circ$ cho 5 trục đầu và $\pm 720^\circ$ cho trục cổ tay 3).
-- **Vệ sĩ Chạy ngầm (Runtime Monitor & Safe Return):** Luồng song song 20Hz liên tục đo lường ma trận Jacobian. Nếu kỹ sư vô tình bẻ tay máy vào vùng lõi kỳ dị ($\sigma_{min}$ chạm ngưỡng đỏ), hệ thống sẽ lập tức giật quyền điều khiển, hãm phanh khẩn cấp và gọi module `SafeReturn` để rụt tay máy về vị trí Home an toàn.
-- **Auto-Snap & VR Haptics:** Phản hồi xúc giác (Haptic) rung tay cầm lập tức khi robot chạm vật cản, mất nội suy, hoặc kẹt kỳ dị. Đặc biệt, nếu robot bị kẹt hoặc nằm ngoài tầm với quá 2.0 giây, ngàm 3D ảo sẽ tự động giật lùi (Auto-Snap) về lại đúng vị trí vật lý hiện tại của tay máy thực.
-- **3D Web Interface (Modern Industrial):** Giao diện điều khiển Viser tinh giản theo hướng công nghiệp chuyên nghiệp, hỗ trợ nút quy hoạch về Home "một chạm" khép kín (tự động ngắt, chạy về, và tự động bật lại hệ thống Teleop).
+1. **Dieu khien Vien Thao Thoi Gian Thuc (20Hz RTDE servoJ):**
+   - Dong bo chuyen dong 6DoF tu tay cam Meta Quest 3S sang robot UR3e voi do tre cuc thap.
+   - Bo thuc thi `ServoJExecutor` su dung tham so toi uu cho chu ky 20Hz: `dt = 0.05`s, `lookahead_time = 0.04`s, `gain = 800`.
+   - Che do dieu khien phan tach chuc nang:
+     - **Chi bop Co (Trigger):** Tinh tien khong gian (World-Centric mapping, khoa goc xoay).
+     - **Chi bop Grip:** Xoay dau hut/gap theo he toa do dau cong cu (Tool-Centric mapping, khoa tinh tien).
+     - **Bop ca Trigger + Grip:** Chuyen dong tu do 6DoF dong thoi.
+     - **Co che Smart Clutch:** Tu dong chot mo neo moi (Reset Anchor) ngay khi doi nut bam, triet tieu hoan toan loi nhay toa do (teleport).
 
-## Kiến trúc Hệ thống (Architecture)
+2. **GPU Collision-Free Inverse Kinematics (NVIDIA CuRobo 0.8):**
+   - Giai bai toan IK thoi gian thuc tren GPU CUDA (3–6ms), tu dong kiem tra va cham voi ban lam viec, tuong chan va bao ve cum camera/ngam kep.
+   - Toi uu hoa vung an toan: `collision_sphere_buffer: 0.005` (5mm) va cac qua cau cum camera/tool0 ban kinh 2.2cm.
+   - Co che chong dao nhanh IK (Branch Consistency Penalty): Bo sung he so phat lech nhanh (`branch_penalty = 50.0` khi lech > 0.8 rad) voi 64 hat giong (seeds) va 16 nghiem tra ve, loai bo triet de loi lat khop co tay (Loi van xoan).
 
-Hệ thống được thiết kế theo mô hình Lego (Modular Design) với 6 khối tách biệt hoàn toàn:
+3. **Luồng Stream Camera Cổ Tay Trực Tiếp Trong VR Dashboard:**
+   - Khung "CAMERA STREAM" tren giao dien WebXR Cockpit hien thi goc nhin truc tiep tu camera ao gan o co tay robot (`SyntheticWristCamera`, do phan giai 640x480, FOV 65 do).
+   - Truy truyen khung hinh qua WebSocket (`wrist_cam`) va endpoint HTTP `/wrist_camera.jpg`.
+
+4. **Mo Phong Gap/Tha 3D (Interactive Grasp Simulator):**
+   - Mo phong co che gap/hut vat the qua ca chua 3D khi ngam tiep can dung vi tri (khoang cach 3D < 9.5cm hoac lech XY < 5.5cm kem do cao Z < 13cm).
+   - Tu dong phat hien khi dua vat the vao khay chua va ghi nhan su kien hoan thanh nhiem vu.
+   - Nut bam Gripper doc lap (nut A/X tren tay cam hoac checkbox tren Web UI) khong bi xung dot voi nut Grip xoay co tay.
+
+5. **Co Che Tu Dong Thu Hoi XYZ (Auto-Snap on Stuck):**
+   - Khi robot gap tinh trang ket tu the (van xoan khop) hoac vuong vat can keo dai qua 1.2 giay (`snap_threshold = 1.2`), he thong tu dong phat tin hieu rung Haptic toi tay cam va giat toa do Widget 3D ve dung dau tay may robot that (`fk_res`), giup nguoi van hanh tiep tuc dieu khien tro lai ngay lap tuc.
+
+6. **Thu Thap & Quan Ly Du Lieu AI Chuan HDF5:**
+   - Ghi lai chuoi thao tac day du: goc khop (`qpos`), van toc (`qvel`), lenh dieu khien (`action`), trang thai ngam gap (`gripper`), anh camera co tay (`images/wrist_camera`), timestamp o tan so 20Hz.
+   - Tu dong danh dau ket qua thanh cong/that bai (`success=True/False`).
+
+7. **Bo Cong Cu Kiem Dinh & Tai Lap Quy Dao (Data Sanity & Replay):**
+   - `verify_dataset.py`: Quet toan bo file HDF5 kiem tra gia tri NaN/Inf, bien thien chu ky lay mau (dt jitter), kich thuoc tensor hinh anh.
+   - `replay_episode.py`: Tai hien lai quy dao trinh dien o che do Offline Dry-Run hoac Live Replay ban lenh truc tiep sang robot.
+
+8. **Cac Lop Bao Ve An Toan (Safety Gate & Watchdog):**
+   - **Chong lat khop co tay (Anti-Twist Guard):** Chan buoc nhay goc khop dot ngot (`max_jump > 1.5` rad).
+   - **Gioi han toc do (Rate Limiter):** Kep van toc goc khop toi da $\le 2.0$ rad/s de bao ve hop so robot vat ly.
+   - **Giam sat mat ket noi (Timeout Watchdog):** Tu dong ngat ServoJ va giat lui Gizmo ve robot neu mat tin hieu VR qua 2 giay.
+
+---
+
+## 2. Danh Sach Thu Vien & Moi Truong Cai Dat
+
+### Yeu cau He thong
+- **He dieu hanh:** Ubuntu 20.04 hoac 22.04 LTS (x86_64).
+- **Phan cung:** NVIDIA GPU ho tro CUDA 12.0+ (RTX 3060 tro len).
+- **Gia lap URSim:** UR3e chay tren Docker hoac ROS 2 driver (Port 30004 cho RTDE Data, Port 30002 cho script/dashboard).
+
+### Bang Thu Vien Python
+
+| Thu vien | Phien ban | Vai tro trong he thong |
+| :--- | :--- | :--- |
+| `torch`, `torchvision` | 2.1.0+ (CUDA) | Tinh toan ma tran Tensor GPU cho CuRobo va Jacobian singularity metric. |
+| `curobo` | 0.8.0+ | Bo giai IK va quy hoach tranh va cham tren GPU NVIDIA. |
+| `viser` | 0.2.0+ | May chu WebGL 3D Visualization, Gizmo tuong tac va Web UI. |
+| `ur_rtde` | 1.5.0+ | Giao tiep thoi gian thuc RTDE voi bo dieu khien UR qua port 30004. |
+| `opencv-python` | 4.8.0+ | Render va ma hoa JPEG luong camera ao co tay (640x480). |
+| `transforms3d` | 0.4.0+ | Chuyen doi giua Axis-Angle, Quaternion va Rotation Matrix. |
+| `trimesh` | 4.0.0+ | Load va phan tich mo hinh luoi 3D robot va canh vat can. |
+| `h5py` | 3.9.0+ | Ghi va doc tap du lieu AI Demonstration chuan HDF5. |
+| `pyyaml` | 6.0+ | Doc file cau hinh robot (`ur3e_custom.yml`) va vat can (`obstacle_scene.yml`). |
+| `websockets` | 12.0+ | May chu truyen nhan du lieu 6DoF tu tay cam WebXR voi do tre thap. |
+| `cryptography` | 41.0+ | Tu dong sinh chung chi SSL/TLS cho may chu HTTPS WebXR. |
+| `numpy`, `scipy` | 1.24+ | Tinh toan dai so tuyen tinh, phep quay SE(3) va bo loc EMA. |
+
+### Lenh Cai Dat
+
+```bash
+# Tao va kich hoat moi truong ao
+python3 -m venv ~/curobo/.venv
+source ~/curobo/.venv/bin/activate
+
+# Cai dat PyTorch voi CUDA
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# Cai dat cac thu vien phu tro
+pip install viser ur_rtde opencv-python transforms3d trimesh h5py pyyaml websockets cryptography numpy scipy
+
+# Cai dat NVIDIA CuRobo
+pip install curobo --extra-index-url https://pypi.nvidia.com
+```
+
+---
+
+## 3. Cau Truc Thu Muc Du An
 
 ```text
 ur_ws/curobo_ursim/
-├── main.py                          <-- File chạy chính (Giao diện Web Viser & Main Loop)
-├── README.md                        <-- Hướng dẫn 
-├── config/                          <-- Cấu hình thông số an toàn (yaml)
-├── assets/                          <-- Chứa tài nguyên mô hình 3D, vật cản
-│   ├── ur3e_custom.urdf
-│   ├── ur3e_custom.yml
-│   └── obstacle_scene.yml
-├── core/                            <-- Chứa các thư viện và công cụ điều khiển cơ bản
-│   ├── curobo_ursim_control.py      <-- Bộ giao tiếp gốc với URSim
-│   ├── ur_executor.py               <-- Chuyển đổi lệnh quỹ đạo sang URScript
-│   └── data_logger.py               <-- Ghi log Teleop
-├── planners/                        <-- Chứa các Module quy hoạch đường đi (Lego blocks)
-│   ├── trajectory_planner.py        <-- Module quản lý việc tránh vật cản
-│   └── pyroki_mp.py                 <-- Bộ giải nội suy của thư viện PyRoki
-├── safety/                          <-- Chứa các Module bảo vệ an toàn
-│   ├── runtime_monitor.py           <-- Luồng nền 20Hz giám sát robot
-│   ├── safe_return.py               <-- Hàm tự động thu hồi cánh tay về Home
-│   └── singularity_guard/           <-- Toán học tính toán ma trận Jacobian
-├── teleop/                          <-- Chứa Module tương tác bằng chuột/VR
-│   └── teleoperation.py             <-- Bộ điều phối Teleop gốc (PC)
-└── teleop_quest/                    <-- Module lõi điều khiển VR trên Meta Quest
-    ├── main_quest.py                <-- File chạy chính cho WebXR & Viser UI
-    ├── quest_server.py              <-- Server HTTPS & WebSockets nhận tín hiệu tay cầm
-    ├── delta_pose_source.py         <-- Nguồn tọa độ chuyển hóa 6DOF từ VR
-    ├── network_utils.py             <-- Quản lý cấu hình IP & tự động cấp SSL Cert
-    ├── pose_sources.py              <-- Xử lý mỏ neo tọa độ, chống rung EMA/Slerp
-    ├── timeout_watchdog.py          <-- E-stop ngắt kết nối tự động nếu mạng rớt
-    └── static/                      <-- Giao diện Dashboard (HTML, JS, CSS)
+├── main.py                          # Diem khoi chay chinh cua he thong
+├── README.md                        # Tai lieu huong dan he thong
+├── assets/
+│   ├── ur3e_custom.urdf             # URDF UR3e mo ta link, khop va tool0
+│   ├── ur3e_custom.yml              # Cau hinh CuRobo kinematics, collision spheres va bounds
+│   └── obstacle_scene.yml           # Cau hinh mat ban va vach ngan vat can
+├── config/
+│   └── singularity.yaml             # Nguong an toan Jacobian singularity (sigma_min)
+├── core/
+│   ├── curobo_ursim_control.py      # Bo giai CuRoboIK (GPU batched seeds, branch penalty)
+│   ├── data_logger.py               # Module ghi Demonstration HDF5 o tan so 20Hz
+│   ├── verify_dataset.py            # Cong cu kiem tra chat luong tap du lieu HDF5
+│   └── replay_episode.py            # Cong cu tai hien quy dao thao tac
+├── safety/
+│   ├── __init__.py                  # Export SingularityGuard
+│   └── singularity_guard/
+│       ├── guard_core.py            # Giam sat diem ky di thoi gian thuc
+│       ├── jacobian_metrics.py      # Tinh toan sigma_min tu ma tran Jacobian
+│       └── calibration.py           # Can chinh nguong ky di theo khong gian lam viec
+├── teleop/
+│   └── teleoperation.py             # TeleoperationController, ServoJExecutor, SafetyGate
+├── teleop_quest/
+│   ├── main_quest.py                # Vong lap chinh 20Hz tich hop VR, Viser, Camera va GraspSim
+│   ├── viser_ui.py                  # Giao dien Viser 3D Cockpit va camera preview
+│   ├── grasp_simulator.py           # Mo phong gap/tha qua ca chua 3D vao gio
+│   ├── synthetic_camera.py          # Render camera ao co tay 640x480 (Eye-in-Hand)
+│   ├── quest_server.py              # Server HTTPS (8443) va WSS (8444) cho WebXR Quest
+│   ├── network_utils.py             # Tim IP LAN va tu dong sinh chung chi SSL
+│   ├── pose_sources.py              # WidgetPoseSource (doc toa do Viser Widget kem bo loc EMA)
+│   ├── delta_pose_source.py         # Chuyen doi vi phan Quest sang UR3e base_link
+│   ├── timeout_watchdog.py          # E-Stop va tu dong thu hoi khi mat tin hieu
+│   ├── home_planner.py              # Dua robot ve vi tri Home an toan
+│   └── static/
+│       ├── index.html               # Giao dien WebXR Cockpit tren kinh Quest
+│       ├── main.js                  # Xu ly gamepad WebXR, stream camera ao va haptic
+│       └── style.css                # Style hien thi phong cach HUD
+└── tests/
+    ├── test_camera.py               # Kiem thu render camera ao o cac goc nhin & giao dien GUI
+    ├── test_simulated_pick_and_place.py # Kiem thu tu dong pick-place ca chua va xuat HDF5
+    └── test_singularity_guard.py    # Kiem thu tinh toan Jacobian singularity metric (sigma_min)
 ```
 
-## Luồng Hoạt động Thời gian thực (Main Loop)
+---
 
-Hệ thống chính (`main.py`) hoạt động như một hệ điều hành với vòng tuần hoàn ở tần số **20Hz (0.05s/vòng)**. Luồng sự kiện được phân nhánh thông minh dựa trên hành vi tương tác của kỹ sư:
+## 4. Huong Dan Van Hanh
 
-1. **Nhánh A (Teleop Bám đuổi):** Khi đang bật tính năng Teleop. Hệ thống trích xuất vị trí Target Widget $\rightarrow$ Gọi IK giải nghiệm $\rightarrow$ Chuyển qua Safety Gate kiểm tra vặn xoắn $\rightarrow$ Phát lệnh `servoj` chớp nhoáng ép robot bám theo trục tọa độ không độ trễ.
-2. **Nhánh B (Preview Dò đường):** Khi đang nhấn giữ chuột (Teleop tắt). CuRobo IK tính nháp nghiệm và bắn kết quả lên Web hiển thị "Robot bóng ma", cho phép kỹ sư biết trước đích đến có khả thi hay không trước khi chốt hạ.
-3. **Nhánh C (AI Tự hành - Motion Planning):** Khi kỹ sư vừa buông chuột. Khối `TrajectoryPlanner` thức dậy, đánh thức thuật toán nội suy vẽ "sợi dây thun" uốn lượn né qua vật cản. Toàn bộ quỹ đạo được bọc thành chuỗi lệnh `movej` và bơm một lèo xuống tủ điều khiển.
-4. **Nhánh D (Thực thi Quỹ đạo):** Trong lúc tay máy tự động bò lách vật cản, hệ thống liên tục đọc vận tốc thực tế (`qd_real`) và đánh giá chỉ số rủi ro kỳ dị (`sigma_min`) để hiển thị cảnh báo.
-5. **Vệ sĩ Độc lập (Background Monitor):** Bất kể Main Loop đang làm gì, luồng `RuntimeMonitor` vẫn luôn chạy nền. Nếu phát hiện rủi ro kẹt cơ học (Lõi điểm kỳ dị), luồng này sẽ cướp quyền Main Loop, ngắt Teleop và ép tay máy chạy thoát hiểm (`SafeReturn`).
-
-## Hướng dẫn Cài đặt & Chạy thử (Getting Started)
-
-### 1. Yêu cầu hệ thống (Prerequisites)
-- Hệ điều hành: Ubuntu 22.04+
-- Phần cứng: NVIDIA GPU (RTX 3060 trở lên khuyến nghị)
-- Môi trường: Môi trường ảo Python chứa cài đặt CuRobo, JAX, và Viser.
-- Tủ điều khiển thật UR3e hoặc URSim (Mô phỏng máy ảo).
-
-### 2. Thiết lập Chế độ chạy (Mô phỏng vs Robot thật)
-Hệ thống mặc định kết nối với máy ảo mô phỏng **URSim** thông qua IP Local. 
-
-**Tùy chọn A: Chạy Mô phỏng (URSim)**
-- Đảm bảo URSim (Docker hoặc Máy ảo) đang chạy trên máy tính.
-- Để nguyên IP mặc định `127.0.0.1` trong code.
-
-**Tùy chọn B: Chạy Robot thật (Real UR3e)**
-- Cắm cáp mạng LAN từ máy tính vào tủ điều khiển (Teach Pendant).
-- Mở 2 file sau và đổi thành IP thật của tủ điều khiển (Ví dụ: `192.168.1.xxx`):
-  - `core/curobo_ursim_control.py` (Dòng 42)
-  - `teleop/teleoperation.py` (Dòng 153)
-```python
-ROBOT_IP = "192.168.1.xxx" # Nhập IP thật của Teach Pendant
-```
-
-### 3. Khởi động hệ thống
-Mở Terminal, di chuyển vào thư mục dự án và kích hoạt môi trường ảo (Virtual Environment) trước khi chạy:
-
-```bash
-# 1. Chuyển vào thư mục chứa code
-cd /home/nguyen/ur_ws/curobo_ursim
-
-# 2. Kích hoạt môi trường ảo Python có chứa CuRobo
-source ~/curobo/.venv/bin/activate
-
-# 3. Chạy file gốc của hệ thống
-python3 main.py
-```
-*Dấu hiệu thành công:* Terminal sẽ hiện dòng chữ `[MP] Motion Planner sẵn sàng` và `[Viser] Đã render vật cản`. Máy chủ Web sẽ bắt đầu lắng nghe ở cổng `8080`.
-
-### 4. Hướng dẫn Chạy VR Teleop Toàn tập (Meta Quest 3S)
-
-Hệ thống giờ đây được nâng cấp mặc định hỗ trợ điều khiển cánh tay Robot bằng kính Meta Quest 3S thông qua công nghệ WebXR, AR Xuyên thấu (Passthrough) và Buồng lái ảo (Virtual Cockpit).
-
-**Bước 1: Khởi động Máy ảo URSim (Nếu chạy mô phỏng)**
-Mở Terminal 1 và chạy lệnh để tự động tải & bật giả lập UR3e:
+### Buoc 1: Khoi dong URSim hoac Robot that
+Neu su dung gia lap URSim:
 ```bash
 ros2 run ur_client_library start_ursim.sh -m ur3e
 ```
+*Ghi chu:* Mac dinh he thong ket noi toi `127.0.0.1`. Neu ket noi robot UR3e that qua mang LAN, cap nhat bien `ROBOT_IP` trong code tuong ung.
 
-**Bước 2: Khởi động Server VR & Giao diện Điều khiển**
-Mở Terminal 2, di chuyển vào thư mục gốc và khởi động hệ thống chính:
+### Buoc 2: Chay chuong trinh chinh
 ```bash
 cd /home/nguyen/ur_ws/curobo_ursim
 source ~/curobo/.venv/bin/activate
 python3 main.py
 ```
-*(Hệ thống sẽ **tự động dò tìm địa chỉ IP hiện tại của máy tính**, tự động nặn chứng chỉ SSL tương ứng và in đường link truy cập ra màn hình Terminal. Khi bạn đổi mạng Wi-Fi/Hotspot, hệ thống cũng sẽ tự động làm lại từ đầu).*
+He thong se hien thi thong tin ket noi:
+- Viser Dashboard: `http://localhost:8080`
+- WebXR Quest: `https://<IP_LAN>:8443` (Data WebSocket tai port `8444`)
 
-**Bước 3: Đeo Kính & Vào Buồng Lái Ảo (Virtual Cockpit)**
-Do sử dụng chứng chỉ bảo mật tự tạo (Self-signed) cho IP LAN, bạn cần "Thông chốt" 1 lần duy nhất cho mỗi IP mới:
-1. Đeo kính Quest (đảm bảo chung mạng Wi-Fi Hotspot với Laptop).
-2. Mở trình duyệt Web của Quest, truy cập **Cổng Dữ Liệu Ngầm**: `https://[IP_HIỆN_TẠI]:8444` $\rightarrow$ Trình duyệt cảnh báo đỏ $\rightarrow$ Bấm **Advanced $\rightarrow$ Proceed** $\rightarrow$ Đóng Tab.
-3. Truy cập **Cổng Giao Diện**: `https://[IP_HIỆN_TẠI]:8443` $\rightarrow$ Trình duyệt cảnh báo đỏ $\rightarrow$ Bấm **Advanced $\rightarrow$ Proceed**.
-4. Trải nghiệm màn hình **Welcome Screen phong cách Light/Modern công nghiệp** hiện ra (nền xám khói sang trọng). Bấm nút **START IMMERSIVE VR**.
-5. Đeo kính và cấp quyền WebXR. Xung quanh bạn sẽ chuyển sang chế độ AR nhìn xuyên thấu, đồng thời Bảng điều khiển ảo (Virtual Cockpit) sẽ hiển thị các thẻ thông số Robot Pose.
+### Buoc 3: Dieu khien bang Viser Web UI (May tinh)
+- Mo trinh duyet tren may tinh tai `http://localhost:8080`.
+- Tich chon **Bat Dieu Khien (Teleop)** de robot bam theo Gizmo 3D.
+- Tich chon **Gripper (Bop Kep)** de bat luc hut gap vat the.
+- Tich chon **Record AI Episode** de bat dau ghi du lieu sang HDF5.
+- Bam **Go to Home** khi can dua robot ve vi tri goc an toan.
 
-**Bước 4: Cơ chế Điều khiển Phân tách (Decoupled Controls & World-Centric)**
-- **Kích hoạt Teleop:** Trên bảng điều khiển Viser, tích chọn ô **`VR Teleop`**.
-- **Chế độ Lái Tỷ lệ 1:1 (World-Centric 1:1):** Thanh trượt tốc độ đã được lược bỏ. Mọi chuyển động của tay người dùng được map chính xác 1:1 với tay máy trong hệ quy chiếu không gian thực (World-Centric). Đẩy tay cầm lên 10cm $\rightarrow$ Robot di chuyển đúng 10cm về phía trước dọc trục X, độc lập với góc nghiêng của tay cầm.
-- **Cơ chế Phân tách Điều khiển:** Hệ thống chia tách rõ rệt chuyển động để triệt tiêu rung nhiễu:
-  - **Chỉ bóp Cò (Trigger):** Kích hoạt **Chỉ Tịnh Tiến**. Khóa chết trục xoay. 
-  - **Chỉ bóp Nút Hông (Grip):** Kích hoạt **Chỉ Xoay**. Khóa chết tịnh tiến. Áp dụng hệ quy chiếu **Tool-Centric** (chuẩn công nghiệp).
-  - **Bóp cả 2 Nút:** Chuyển động tự do 6D (vừa đẩy vừa xoay).
-- **Giao diện Tiếng Anh Chuyên Nghiệp:** Toàn bộ bảng điều khiển HTML và Viser 3D đã được địa phương hóa sang Tiếng Anh, loại bỏ các icon/emoji rườm rà, mang lại giao diện tinh tế, hiện đại.
-- **Chế độ Lái Xuyên Thấu (Lock UI):** Nút bấm `Lock UI (Drive Mode)` được bố trí ngay góc trái. Khi kích hoạt, tia laser của VR sẽ bắn xuyên qua bảng điều khiển, giúp kỹ sư vừa quan sát thông số theo thời gian thực vừa thoải mái vung tay lái robot mà không lo vô tình click nhầm vào các nút trên web.
-- **Tích hợp Camera (Collision Checking):** Cấu hình CuRobo (`ur3e_custom.yml`) đã được bổ sung ma trận lưới các khối cầu (spheres) ôm trọn lấy ngàm bích `tool0` để giả lập thể tích của Camera (ví dụ RealSense) gắn ngoài. Hệ thống sẽ tự động kháng cự và bảo vệ an toàn tuyệt đối, không cho camera đâm vào chướng ngại vật hay mặt bàn.
+### Buoc 4: Dieu khien bang Kinh Meta Quest 3S (WebXR)
+1. Dam bao kinh Meta Quest 3S va may tinh ket noi cung mang Wi-Fi LAN.
+2. Tren trinh duyet Meta Quest Browser:
+   - Truy cap `https://<IP_LAN>:8444` -> Chon **Advanced** -> **Proceed to unsafe** (chap nhan chung chi SSL tu sinh cho kenh WebSocket).
+   - Truy cap `https://<IP_LAN>:8443` -> Chon **Advanced** -> **Proceed to unsafe** (chap nhan chung chi SSL cho kenh WebXR).
+3. Bam **START IMMERSIVE VR** tren man hinh chao mung.
+4. **Cac thao tac tay cam:**
+   - **Bop Co (Trigger):** Tinh tien dau robot trong khong gian (trai/phai, tien/lui, len/xuong).
+   - **Bop Grip (Nut hong):** Xoay co tay robot theo huong tay cam.
+   - **Nut A / X tren tay cam:** Bat/tat ngam kep Gripper de gap hoac tha qua ca chua.
+   - **Khung Camera Stream:** Hien thi goc nhin truc tiep tu dau tay may robot theo thoi gian thuc.
 
-## Lưu ý An toàn (Safety Warnings)
+---
 
-Hệ thống đã được tinh chỉnh thông số (Scale 0.7, EMA Filter 0.1 mượt mà, và Max Velocity Clamp 1.2 rad/s) để đảm bảo độ êm ái nhưng vẫn cực kỳ "bốc" khi chạy trên robot thật. Tuy nhiên:
-1. **LUÔN LUÔN** đặt tay lên nút Dừng Khẩn Cấp (E-Stop) của tủ điều khiển.
-2. Tuyệt đối không đứng trong bán kính hoạt động 1.5 mét của robot khi đang test Teleop.
-3. Nếu tay cầm rung mạnh (Haptics) báo hiệu lỗi vật cản hoặc kỳ dị, hãy lập tức nhả cò để ngàm 3D tự động snap về vị trí an toàn.
+## 5. Kiem Thu He Thong & Quan Ly Du Lieu
 
+### 1. Kiem thu tu dong Gap Ca Chua & Xuat HDF5
+Chay truc tiep file test trong thu muc `tests/` hoac qua shortcut goc:
+```bash
+/home/nguyen/curobo/.venv/bin/python tests/test_simulated_pick_and_place.py
+```
+Ket qua kiem tra:
+- Tap tin Demonstration HDF5 duoc tao tai: `logs/ai_training_data/test_grasp_sim/episode_X.hdf5`.
+- Anh chup camera ao co tay tai thoi diem hoan thanh: `logs/simulated_wrist_camera_view.jpg`.
+
+### 2. Kiem thu Camera ao Co tay (Synthetic Wrist Camera)
+```bash
+/home/nguyen/curobo/.venv/bin/python tests/test_camera.py
+```
+Kiem tra render 4 goc nhin (Chinh giua, Lech trai, Lech phai, Day ra xa). Cac file anh ket xuat se duoc luu vao thu muc `logs/`.
+
+Neu muon kiem tra truc quan bang thanh truot tren Viser:
+```bash
+/home/nguyen/curobo/.venv/bin/python tests/test_camera.py --gui
+```
+Sau do mo `http://localhost:8089` de keo toa do qua ca chua truc tiep.
+
+### 3. Kiem thu Lop Bao Ve Diem Ky Di (Singularity Guard)
+```bash
+/home/nguyen/curobo/.venv/bin/python tests/test_singularity_guard.py
+```
+Kiem tra tinh toan ma tran Jacobian metric ($\sigma_{min}$) tren GPU o ca tu the an toan lan tu the duoi thang co tay ($q_5 \approx 0$).
+
+### 4. Kiem dinh chat luong Tap Du Lieu (Sanity Check)
+```bash
+/home/nguyen/curobo/.venv/bin/python core/verify_dataset.py
+```
+Kiem tra toan ven cac episode: xac minh khong co gia tri `NaN`/`Inf`, kiem tra do lech tan so lay mau `dt`, kiem tra so frame va do phan giai anh camera.
+
+### 5. Tai lap Quy dao Demonstration (Replay)
+- **Offline Dry-Run (kiem tra quy dao tren Viser khong ban lenh sang robot):**
+  ```bash
+  /home/nguyen/curobo/.venv/bin/python core/replay_episode.py --file logs/ai_training_data/test_grasp_sim/episode_0.hdf5
+  ```
+- **Live Replay (ban lenh dieu khien truc tiep toi URSim / Robot that):**
+  ```bash
+  /home/nguyen/curobo/.venv/bin/python core/replay_episode.py --file logs/ai_training_data/test_grasp_sim/episode_0.hdf5 --execute --ip 127.0.0.1
+  ```
+
+---
+
+## 6. Thong So Ky Thuat Dieu Khien Chinh
+
+| Tham so | Gia tri | Giai thich ky thuat |
+| :--- | :--- | :--- |
+| **Tan so vong lap chinh** | 20 Hz (`dt = 0.05`s) | Dong bo giua WebXR, Viser, CuRobo va RTDE servoJ. |
+| **ServoJ Lookahead Time** | `0.04` s | Noi suy chuyen dong muot ma, loai bo do tre va do ro giat. |
+| **ServoJ Gain** | `800` | Do cung bam quy dao cao, giup dau robot bam sat vi tri tay nguoi. |
+| **Van toc khop toi da (Rate Limiter)** | `2.0` rad/s | Kep gia toc va van toc khop de chong loi Protective Stop tren UR. |
+| **Nguong phat hien van xoan khop** | `1.5` rad | Chan nhung buoc nhay dot ngot do dao nghiem IK gan diem ky di. |
+| **So hat giong CuRobo IK** | 64 seeds | Nang cao xac suat tim nghiem lien tuc tren GPU. |
+| **He so phat lech nhanh IK** | `50.0` (khi lech > 0.8 rad) | Giu robot luon o nhanh dong hoc dong nhat voi vi tri hien tai. |
+| **Deadband tinh tay cam VR** | 5 mm (`0.005` m) | Loai bo rung tay sinh ly voi co che tru mem (Soft Deadband). |
+| **Do lech tay cam toi da (max_delta_m)** | 0.25 m | Pham vi keo tay moi nhip bop co, tao cam giac thoai mai. |
+| **Bo loc lam muot EMA (Alpha)** | 0.35 | Can bang giua do nhay phan hoi va chong nhieu jitter. |
+| **Nguong thoi gian Auto-Snap** | 1.2 s | Tu dong keo XYZ ve dau tay may khi bi ket tu the hoac vuong vat can. |
