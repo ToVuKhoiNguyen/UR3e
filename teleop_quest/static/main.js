@@ -8,6 +8,7 @@
         const elValSource = document.getElementById('val-source');
         const elValTrigger = document.getElementById('val-trigger');
         const elValGrip = document.getElementById('val-grip');
+        const elValGripperBtn = document.getElementById('val-gripper-btn');
         const elValX = document.getElementById('val-x');
         const elValY = document.getElementById('val-y');
         const elValZ = document.getElementById('val-z');
@@ -221,10 +222,14 @@
                 if (pose) {
                     let triggerPressed = false;
                     let gripPressed = false;
+                    let gripperBtnPressed = false;
                     
                     if (activeSource.gamepad && activeSource.gamepad.buttons) {
                         if (activeSource.gamepad.buttons.length > 0) triggerPressed = activeSource.gamepad.buttons[0].pressed;
                         if (activeSource.gamepad.buttons.length > 1) gripPressed = activeSource.gamepad.buttons[1].pressed;
+                        // Nút A (phải) / X (trái) (button 4) hoặc B/Y (button 5) dùng riêng để Kẹp/Nhả Gripper
+                        if (activeSource.gamepad.buttons.length > 4) gripperBtnPressed = activeSource.gamepad.buttons[4].pressed;
+                        if (activeSource.gamepad.buttons.length > 5 && !gripperBtnPressed) gripperBtnPressed = activeSource.gamepad.buttons[5].pressed;
                     }
 
                     let pos = pose.transform.position;
@@ -236,7 +241,8 @@
                         pos: [pos.x, pos.y, pos.z],
                         quat: [quat.w, quat.x, quat.y, quat.z],
                         trigger: triggerPressed,
-                        grip: gripPressed
+                        grip: gripPressed,
+                        gripper_btn: gripperBtnPressed
                     }));
                     
                     let handName = activeSource.handedness === 'right' ? "Right Hand" : (activeSource.handedness === 'left' ? "Left Hand" : "Unknown");
@@ -249,6 +255,11 @@
                     
                     elValGrip.innerText = gripPressed ? "Pressed" : "Released";
                     elValGrip.className = gripPressed ? "badge red" : "badge gray";
+
+                    if (elValGripperBtn) {
+                        elValGripperBtn.innerText = gripperBtnPressed ? "Closed" : "Open";
+                        elValGripperBtn.className = gripperBtnPressed ? "badge red" : "badge gray";
+                    }
                     
                     elValX.innerText = pos.x.toFixed(4);
                     elValY.innerText = pos.y.toFixed(4);

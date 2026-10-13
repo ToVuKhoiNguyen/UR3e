@@ -293,11 +293,11 @@ def main():
                 if "thất bại" in status_low or "cảnh báo" in status_low or "singularity" in status_low:
                     quest_server.send_haptic(intensity=1.0, duration=150)
 
-                # Cập nhật logic gắp thả vật thể 3D (Cà chua 🍅): Hỗ trợ cả VR Grip và Checkbox Chuột
+                # Cập nhật logic gắp thả vật thể 3D (Cà chua 🍅): Độc lập nút Gripper (nút A/X) với Clutch xoay (Grip)
                 vr_frame = quest_server.get_frame()
-                vr_grip = 1.0 if (vr_frame and vr_frame.get("grip")) else 0.0
+                vr_gripper = 1.0 if (vr_frame and (vr_frame.get("gripper_btn", False) or vr_frame.get("button_a", False))) else 0.0
                 mouse_grip = 1.0 if ui.cb_gripper.value else 0.0
-                grip_val = max(vr_grip, mouse_grip)
+                grip_val = max(vr_gripper, mouse_grip)
                 is_grip_pressed = bool(grip_val > 0.5)
 
                 is_holding, grasp_event = grasp_sim.update(fk_res["pos"], is_grip_pressed)
