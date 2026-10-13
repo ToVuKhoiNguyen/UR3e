@@ -218,6 +218,8 @@ def main():
 
     # 7. Vòng lặp điều khiển chính (20Hz)
     while True:
+        loop_start_time = time.perf_counter()
+
         # A. Kiểm tra VR E-Stop
         if quest_server.check_and_clear_estop():
             teleop.enabled = False
@@ -340,7 +342,10 @@ def main():
         else:
             ui.set_status("Tắt")
 
-        time.sleep(POLL_SLEEP)
+        # Bù trừ thời gian trễ thực tế để duy trì chính xác tần số 20Hz (50ms/bước)
+        elapsed = time.perf_counter() - loop_start_time
+        sleep_duration = max(0.001, POLL_SLEEP - elapsed)
+        time.sleep(sleep_duration)
 
 if __name__ == "__main__":
     main()
