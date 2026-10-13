@@ -36,6 +36,10 @@ class QuestServer:
         with self._lock:
             return self._latest_frame
 
+    @property
+    def last_frame(self):
+        return self.get_frame()
+
     def last_seen(self) -> float:
         with self._lock:
             return self._last_seen

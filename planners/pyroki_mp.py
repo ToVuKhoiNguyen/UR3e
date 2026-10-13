@@ -109,6 +109,12 @@ def _solve_online_planning_jax(
         pk.costs.smoothness_cost(traj_var_prev, traj_var_next, weight=10.0),
         pk.costs.limit_velocity_cost(jax.tree.map(lambda x: x[None], robot), traj_var_prev, traj_var_next, weight=1.0, dt=dt),
         pk.costs.limit_cost(jax.tree.map(lambda x: x[None], robot), traj_var, weight=100.0),
+        pk.costs.manipulability_cost(
+            jax.tree.map(lambda x: x[None], robot),
+            traj_var,
+            target_links,
+            weight=1.0,
+        ),
         pk.costs.self_collision_cost(
             jax.tree.map(lambda x: x[None], robot),
             jax.tree.map(lambda x: x[None], robot_coll),

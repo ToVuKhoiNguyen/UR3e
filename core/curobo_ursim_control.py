@@ -64,7 +64,6 @@ UR3E_LIMITS = [
     (-4 * math.pi, 4 * math.pi),  # wrist_3_joint        — Unlimited (set to ±720° for safety)
 ]
 
-
 # ===========================================================================
 # Joint normalisation utilities
 # ===========================================================================
@@ -215,11 +214,15 @@ class CuRoboIK:
                 robot=ROBOT_CONFIG,
                 scene_model=scene_file,
                 num_seeds=num_seeds,
+                velocity_regularization_weight=0.1,
+                acceleration_regularization_weight=0.05,
             )
         else:
             self.cfg = InverseKinematicsCfg.create(
                 robot=ROBOT_CONFIG,
                 num_seeds=num_seeds,
+                velocity_regularization_weight=0.1,
+                acceleration_regularization_weight=0.05,
             )
         self.solver     = InverseKinematics(self.cfg)
         self.n_seeds    = return_seeds
