@@ -57,10 +57,11 @@ class DataLogger:
         self.buffer_images: Dict[str, List[np.ndarray]] = {}
         self.episode_start_time = 0.0
 
-    def start_episode(self, task_description: str = "UR3e Teleoperation Pick and Place"):
+    def start_episode(self, task_description: str = "UR3e Teleoperation Pick and Place", metadata: Optional[Dict[str, Any]] = None):
         """Bắt đầu một episode mới"""
         self._reset_buffer()
         self.task_description = task_description
+        self.metadata = metadata or {}
         self.episode_start_time = time.time()
         self.is_recording = True
         print(f"[AI DataLogger] >>> BẮT ĐẦU Episode {self.current_episode_idx} ({self.task_description})")
@@ -85,7 +86,8 @@ class DataLogger:
         self.buffer_timestamps_ms.append(ts)
         self.buffer_q_actual.append(list(q_actual) if q_actual is not None else [0.0]*6)
         self.buffer_qd_actual.append(list(qd_actual) if qd_actual is not None else [0.0]*6)
-        self.buffer_tcp_actual.append(list(tcp_actual) if tcp_actual is not None else [0.0]*7)
+        tcp_fallback_len = len(tcp_actual) if tcp_actual is not None else 6
+        self.buffer_tcp_actual.append(list(tcp_actual) if tcp_actual is not None else [0.0]*tcp_fallback_len)
         self.buffer_gripper_actual.append(float(gripper_actual))
 
         # Target actions
@@ -130,6 +132,11 @@ class DataLogger:
             f.attrs["success"] = success
             f.attrs["task_description"] = getattr(self, "task_description", "Pick and Place")
             f.attrs["duration_sec"] = time.time() - self.episode_start_time
+            for meta_k, meta_v in getattr(self, "metadata", {}).items():
+                if isinstance(meta_v, (list, tuple, np.ndarray)):
+                    f.attrs[meta_k] = np.array(meta_v)
+                else:
+                    f.attrs[meta_k] = meta_v
 
             # Group: observations
             obs_grp = f.create_group("observations")

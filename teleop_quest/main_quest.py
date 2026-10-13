@@ -118,17 +118,28 @@ def main():
     watchdog.start()
     home_planner = HomePlanner(ROBOT_CONFIG, SCENE_CONFIG, ui.viz)
 
+    _placed_at_start = 0
+
     # Đăng ký các sự kiện nút bấm trên Viser GUI
     @ui.cb_record.on_update
     def _on_record_update(_):
+        nonlocal _placed_at_start
         if ui.cb_record.value:
-            logger.start_episode(task_description="Pick and Place Teleop Demo")
+            _placed_at_start = grasp_sim.placed_count
+            init_meta = {
+                "tomato_init_pos": list(grasp_sim.tomato_pos),
+                "basket_pos": list(grasp_sim.place_basket_pos),
+            }
+            logger.start_episode(task_description="Pick and Place Tomato Teleop", metadata=init_meta)
             ui.set_status(f"Recording Ep {logger.current_episode_idx}")
         else:
-            saved_file = logger.end_episode(success=True)
+            # Thành công nếu số lượng quả cà chua đặt vào giỏ tăng lên và không còn bị kẹp
+            ep_success = bool(grasp_sim.placed_count > _placed_at_start and not grasp_sim.is_grasped)
+            saved_file = logger.end_episode(success=ep_success)
             if saved_file:
                 ui.set_episodes(logger.current_episode_idx)
-                ui.set_status(f"Saved Ep {logger.current_episode_idx - 1}")
+                status_str = "Thành công" if ep_success else "Chưa hoàn thành"
+                ui.set_status(f"Saved Ep {logger.current_episode_idx - 1} ({status_str})")
             else:
                 ui.set_status("Idle")
 
