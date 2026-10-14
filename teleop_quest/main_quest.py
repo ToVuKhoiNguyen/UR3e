@@ -15,6 +15,7 @@ import time
 import signal
 import yaml
 import traceback
+import threading
 import numpy as np
 
 from core.curobo_ursim_control import CuRoboURSim
@@ -120,7 +121,8 @@ def main():
     # 5. Khởi tạo bộ giám sát mất kết nối & Home Planner
     watchdog = TimeoutWatchdog(quest_server, executor)
     watchdog.start()
-    home_planner = HomePlanner(ROBOT_CONFIG, SCENE_CONFIG, ui.viz)
+    SAFE_HOME_JOINTS = [0.0, -2.2, 1.9, -1.383, -1.57, 0.0]
+    home_planner = HomePlanner(ROBOT_CONFIG, SCENE_CONFIG, ui.viz, default_home_q=SAFE_HOME_JOINTS)
 
     _placed_at_start = 0
 
@@ -147,20 +149,36 @@ def main():
             else:
                 ui.set_status("Idle")
 
-    @ui.btn_discard.on_click
-    def _on_btn_discard_click(_):
-        if logger.is_recording:
-            logger.discard_episode()
-            ui.cb_record.value = False
-            ui.set_status("Discarded Episode")
+    @ui.cb_discard.on_update
+    def _on_cb_discard_update(_):
+        if ui.cb_discard.value:
+            if logger.is_recording:
+                logger.discard_episode()
+                ui.cb_record.value = False
+                ui.set_status("Discarded Episode")
+                print("[AI Logger] Đã hủy Episode hiện tại theo yêu cầu!")
+            time.sleep(0.2)
+            ui.cb_discard.value = False
+
+    is_navigating_home = threading.Event()
 
     @ui.btn_home.on_click
     def _on_btn_home_click(_):
-        home_planner.go_home(
-            teleop, executor, ctrl, ui.target_widget,
-            widget_pose_source, ui.ui_status, ui.cb_teleop,
-            poll_sleep=POLL_SLEEP
-        )
+        if is_navigating_home.is_set():
+            print("[HomePlanner] Đang di chuyển về Home, vui lòng đợi...")
+            return
+        threading.Thread(
+            target=home_planner.go_home,
+            args=(
+                teleop, executor, ctrl, ui.target_widget,
+                widget_pose_source, ui.ui_status, ui.cb_teleop
+            ),
+            kwargs={
+                "is_navigating_home": is_navigating_home,
+                "poll_sleep": POLL_SLEEP
+            },
+            daemon=True
+        ).start()
 
 
     # Xử lý tín hiệu tắt an toàn
@@ -181,11 +199,24 @@ def main():
 
     _last_teleop_state = False
     _last_quest_drive_mode = quest_server.get_drive_mode()
+    _was_navigating_home = False
     _frame_count = 0
 
     # 7. Vòng lặp điều khiển chính (20Hz)
     while True:
         loop_start_time = time.perf_counter()
+
+        # Nếu đang thực hiện quy hoạch / di chuyển về Home, tạm hoãn luồng Teleop
+        if is_navigating_home.is_set():
+            _was_navigating_home = True
+            time.sleep(POLL_SLEEP)
+            continue
+
+        # Sau khi vừa hoàn thành trở về Home: Tự động kích hoạt lại Teleop (không cần người dùng bấm lại)
+        if _was_navigating_home:
+            _was_navigating_home = False
+            _last_teleop_state = False  # Đặt lại trạng thái cũ để khối đồng bộ bên dưới kích hoạt tự động
+            ui.cb_teleop.value = True
 
         # A. Kiểm tra VR E-Stop
         if quest_server.check_and_clear_estop():
@@ -256,9 +287,11 @@ def main():
                 # Đồng bộ trạng thái hiển thị
                 if "thất bại" in status_low or "fail" in status_low:
                     ui.set_status("IK Error")
-                elif "ngoai tam voi" in status_low or "out of reach" in status_low:
-                    ui.set_status("Out of Reach")
-                elif "van xoan" in status_low or "vặn xoắn" in status_low or "tu the ket" in status_low:
+                elif "ngoai tam voi" in status_low or "ngoài tầm với" in status_low or "out of reach" in status_low:
+                    ui.set_status("Ngoài tầm với (Out of Reach)")
+                elif "mặt bàn" in status_low or "mat ban" in status_low or "table limit" in status_low:
+                    ui.set_status("Sát mặt bàn bảo vệ")
+                elif "van xoan" in status_low or "vặn xoắn" in status_low or "tu the ket" in status_low or "tư thế kẹt" in status_low:
                     ui.set_status("Tư thế kẹt (Vặn xoắn)")
                 elif "vat can" in status_low or "vật cản" in status_low:
                     ui.set_status("Vướng vật cản")
@@ -297,6 +330,7 @@ def main():
                         pose_source._ema_quat_xyzw = None
                         pose_source._last_button_state = 0
                     pose_source.out_of_reach_time = 0.0
+                    teleop._last_valid_q = list(q_real)
                     ui.set_status("Tự động thu hồi XYZ")
                     quest_server.send_haptic(intensity=1.0, duration=200)
                     print(f"[Auto-Snap] Lỗi vặn xoắn / vướng vật cản ({current_status}) -> Tự động thu hồi XYZ về đầu tay máy!")

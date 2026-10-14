@@ -43,7 +43,11 @@ class CuRoboIKSolver:
 # Output: { "pass": bool, "reason": str, "sigma_min": float }
 #
 class SafetyGate:
-    WRIST_LIMIT = 2.9  # ~166 độ - giới hạn chống tự kẹp (Lớp 5)
+    SHOULDER_PAN_LIMIT = 6.28   # ±360°
+    SHOULDER_LIFT_MAX = 0.05    # q1 không được vượt quá +0.05 rad (chống chúi cắm bắp tay xuống bàn)
+    SHOULDER_LIFT_MIN = -3.14   # q1 không được nhỏ hơn -3.14 rad
+    ELBOW_LIMIT = 2.80          # |q2| <= 2.80 rad (~160 độ) - Cho phép gập sâu, CuRobo tự quản lý va chạm
+    WRIST_LIMIT = 6.28          # Cho phép xoay cổ tay tự nhiên (CuRobo đã kiểm tra self-collision)
 
     def __init__(self, guard):
         self._guard = guard
@@ -51,6 +55,12 @@ class SafetyGate:
     def check(self, q):
         if q is None:
             return {"pass": False, "reason": "IK failed", "sigma_min": 0.0}
+        # Lớp 2: Chống chúi/ngửa bắp tay đâm bàn hoặc đâm đế robot
+        if q[1] > self.SHOULDER_LIFT_MAX or q[1] < self.SHOULDER_LIFT_MIN:
+            return {"pass": False, "reason": f"shoulder_lift_limit(q1={q[1]:.2f})", "sigma_min": 0.0}
+        # Lớp 4: Chống tự va chạm gập khuỷu tay (Elbow self-collision)
+        if abs(q[2]) > self.ELBOW_LIMIT:
+            return {"pass": False, "reason": f"elbow_clamp(|q2|={abs(q[2]):.2f}>2.80)", "sigma_min": 0.0}
         # Lớp 5: Chống tự kẹp cổ tay
         if abs(q[3]) > self.WRIST_LIMIT or abs(q[4]) > self.WRIST_LIMIT:
             return {"pass": False, "reason": "wrist_clamp", "sigma_min": 0.0}
@@ -258,7 +268,8 @@ class TeleoperationController:
                     return
                 
                 # Rate Limiter: Kẹp (clamp) vận tốc khớp tối đa để bảo vệ động cơ thực
-                MAX_VEL = 2.0  # rad/s (~115 độ/s)
+                # Mặc định 0.8 rad/s (~46 độ/s) an toàn tuyệt đối cho test thực tế (cho phép ghi đè qua MAX_JOINT_VEL)
+                MAX_VEL = float(os.environ.get("MAX_JOINT_VEL", "0.8"))
                 DT = self._dt
                 max_dq = MAX_VEL * DT
                 for i in range(6):
@@ -267,8 +278,16 @@ class TeleoperationController:
                     elif q_target[i] - self._last_valid_q[i] < -max_dq:
                         q_target[i] = self._last_valid_q[i] - max_dq
         else:
+            # Phân tách chính xác nguyên nhân không tìm được nghiệm IK
+            pos = pose["pos"]
+            dist_base = (pos[0]**2 + pos[1]**2 + (pos[2] - 0.15)**2)**0.5
             with self._lock:
-                self._status = "Vật cản hoặc ngoài tầm với - Dừng im"
+                if dist_base > 0.44:
+                    self._status = "Ngoài tầm với (Out of Reach) - Dừng im"
+                elif pos[2] < 0.02:
+                    self._status = "Sát mặt bàn bảo vệ (Table Limit) - Dừng im"
+                else:
+                    self._status = "Tư thế không khả thi / Vướng vật cản - Dừng im"
             return
 
         # ── Kiểm tra SafetyGate ──────────────────────────────────────────────

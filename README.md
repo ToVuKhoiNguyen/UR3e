@@ -16,10 +16,11 @@ Hệ thống điều khiển viễn thao thời gian thực (Real-time Teleopera
      - **Cơ chế Smart Clutch:** Tự động chốt mỏ neo mới (Reset Anchor) ngay khi thay đổi nút bấm, triệt tiêu hoàn toàn lỗi nhảy vọt tọa độ (teleport).
    - Chế độ điều khiển Chuột trên PC: Tương tác trực tiếp bằng cách kéo các trục tịnh tiến hoặc vòng xoay góc của khối Target Widget trên trình duyệt Viser.
 
-2. **Động Học Nghịch Tránh Va Chạm Trên GPU (NVIDIA CuRobo 0.8):**
+2. **Động Học Nghịch Tránh Va Chạm Trên GPU (NVIDIA CuRobo 0.8) & Tối Ưu Không Gian Khớp:**
    - Giải bài toán IK thời gian thực trên GPU CUDA (3–6ms), tự động kiểm tra va chạm với bàn làm việc, vách ngăn và cụm camera/ngàm kẹp.
    - Vùng an toàn tinh gọn: `collision_sphere_buffer: 0.005` (5mm) và các quả cầu ngàm kẹp/camera bán kính 2.2cm.
-   - Cơ chế chống đảo nhánh IK (Branch Consistency Penalty): Bổ sung hệ số phạt lệch nhánh (`branch_penalty = 50.0` khi lệch $> 0.8$ rad) kết hợp 64 hạt giống (seeds) và 16 nghiệm trả về, loại bỏ triệt để lỗi lật khớp cổ tay (Lỗi vặn xoắn).
+   - Chuẩn hóa giới hạn góc khớp: Khớp khuỷu (`elbow_joint`) được mở rộng an toàn lên $[-2.80, 2.80]$ rad ($\approx \pm 160^\circ$) và cổ tay duy trì dải quay $\pm 2\pi$, loại bỏ triệt để hiện tượng kẹp góc sai lệch ép thuật toán đảo nhánh IK gây lỗi vặn xoắn khớp khi hạ thấp gắp cà chua.
+   - Cơ chế chống đảo nhánh IK (Branch Consistency Penalty): Bổ sung hệ số phạt lệch nhánh (`branch_penalty = 50.0` khi lệch $> 0.8$ rad) kết hợp 64 hạt giống (seeds) và 16 nghiệm trả về, giữ quỹ đạo luôn mượt mà và ổn định.
 
 3. **Luồng Stream Camera Cổ Tay Trực Tiếp (Real-time 20 FPS) & Driver Hợp Nhất:**
    - Khung "CAMERA STREAM" trên giao diện WebXR Cockpit và sidebar Viser hiển thị trực tiếp góc nhìn từ camera cổ tay robot ở tần số thời gian thực 20 FPS.
@@ -33,28 +34,43 @@ Hệ thống điều khiển viễn thao thời gian thực (Real-time Teleopera
    - Tự động nhận diện khi đưa vật thể vào khay chứa và ghi nhận sự kiện hoàn thành nhiệm vụ (`PLACE_SUCCESS`).
    - Nút bấm Gripper độc lập (nút A/X trên tay cầm VR hoặc checkbox `Gripper (Bóp Kẹp)` trên Web UI) không bị xung đột với nút Grip xoay cổ tay.
 
-5. **Cơ Chế Tự Động Thu Hồi Tọa Độ XYZ (Auto-Snap on Stuck):**
-   - Khi robot gặp tình trạng kẹt tư thế (vặn xoắn khớp) hoặc vướng vật cản kéo dài quá 1.2 giây (`snap_threshold = 1.2`), hệ thống tự động rung phản hồi Haptic tới tay cầm và giật tọa độ Widget 3D về đúng đầu tay máy robot thật (`fk_res`), giúp người vận hành tiếp tục điều khiển trở lại ngay lập tức.
+5. **Cơ Chế Tự Động Thu Hồi Tọa Độ XYZ (Auto-Snap on Stuck) & Reset Seed Thoát Kẹt:**
+   - Khi robot gặp tình trạng kẹt tư thế (vặn xoắn khớp) hoặc vướng vật cản kéo dài quá 1.2 giây (`snap_threshold = 1.2`), hệ thống tự động rung phản hồi Haptic tới tay cầm và giật tọa độ Widget 3D về đúng đầu tay máy robot thật (`fk_res`).
+   - Tự động gán lại hạt giống giải IK `teleop._last_valid_q = list(q_real)`, giúp thuật toán lập tức thoát kẹt và sẵn sàng nhận chuyển động mới từ người vận hành.
 
 6. **Tự Động Dọn Dẹp Kịch Bản Ngầm & Giải Phóng Thanh Ghi RTDE:**
    - Bộ thực thi `ServoJExecutor` và controller `CuRoboURSim` tích hợp cơ chế tự động gửi lệnh `stop\n` tới Dashboard Server (Port 29999) trước khi kết nối RTDE.
    - Loại bỏ hoàn toàn lỗi xung đột thanh ghi (`One of the RTDE input registers are already in use!`) hoặc treo tiến trình khi khởi động lại sau các lần thoát đột ngột.
    - Tự động fallback sang dải thanh ghi trên (`FLAG_UPPER_RANGE_REGISTERS`) nếu kết nối trên robot thật có cấu hình fieldbus (Profinet/EtherNet-IP).
 
-7. **Thu Thập & Quản Lý Dữ Liệu AI Chuẩn HDF5:**
-   - Ghi lại chuỗi thao tác đầy đủ: góc khớp (`qpos`), vận tốc (`qvel`), lệnh điều khiển (`action`), trạng thái ngàm kẹp (`gripper`), ảnh camera cổ tay (`images/wrist_camera`), timestamp ở tần số 20Hz.
-   - Tự động đánh dấu kết quả thành công/thất bại (`success=True/False`).
+7. **Quy Hoạch Trở Về Home An Toàn Không Giật & Chống Rung Lắc Hình Ảnh:**
+   - Chuyển đổi phương thức thực thi quy hoạch Home từ vòng lặp `servoJ` rời rạc sang bộ sinh quỹ đạo phần cứng `movej` chạy ở tần số 500Hz trực tiếp trong bộ điều khiển Universal Robots qua cổng Secondary Port 30002.
+   - Tự động hòa trộn góc bo cung (`blend radius = 0.025`m) khi bám theo các waypoints né vật cản từ CuRobo `MotionPlanner`, triệt tiêu 100% hiện tượng giật cục cơ học do thiếu hụt buffer servoJ.
+   - Loại bỏ xung đột đa luồng cập nhật Viser 3D, xóa bỏ triệt để hiện tượng glitch hình ảnh chập chờn.
 
-8. **Bộ Công Cụ Kiểm Định & Tái Lập Quỹ Đạo (Data Sanity & Replay):**
-   - `verify_dataset.py`: Quét toàn bộ file HDF5 kiểm tra giá trị NaN/Inf, độ lệch chu kỳ lấy mẫu (dt jitter), kích thước tensor hình ảnh.
-   - `replay_episode.py`: Tái hiện lại quỹ đạo trình diễn ở chế độ Offline Dry-Run hoặc Live Replay gửi lệnh trực tiếp sang robot.
+8. **Tự Động Tái Kích Hoạt Teleop Sau Khi Về Home (Zero-Click Auto Reconnect):**
+   - Tích hợp cờ giám sát `_was_navigating_home`, tự động tái kết nối RTDE `executor.connect()`, đặt lại mỏ neo tay cầm VR `pose_source.reset_anchor()` và đưa hệ thống vào trạng thái sẵn sàng điều khiển ngay khi robot về tới Home mà người dùng không cần phải click tắt/bật lại checkbox thủ công.
 
-9. **Các Lớp Bảo Vệ An Toàn (Safety Gate & Singularity Guard):**
-   - **Giám sát điểm kỳ dị (Singularity Guard):** Đánh giá ma trận Jacobian thời gian thực, tự động chặn lệnh nếu giá trị suy biến nhỏ nhất $\sigma_{min} < 0.035$.
-   - **Chống tự kẹp cổ tay (Wrist Clamp Guard):** Chặn góc quay cổ tay vượt quá 2.9 rad (~166 độ).
-   - **Giới hạn tốc độ và gia tốc (Rate Limiter):** Kẹp vận tốc góc khớp tối đa $\le 2.0$ rad/s (tối đa 0.1 rad mỗi bước 50ms) để bảo vệ động cơ robot vật lý.
-   - **Phát hiện lật nhánh IK:** Chặn các bước nhảy góc khớp đột ngột (`max_jump > 1.5` rad).
-   - **Giám sát mất kết nối (Timeout Watchdog):** Tự động dừng khẩn cấp robot qua `servoStop` nếu mất tín hiệu VR quá thời gian timeout.
+9. **Giao Diện Viser 3D Cockpit Tối Giản (Bố Cục Lưới 2x2):**
+   - Gom cụm 4 thao tác điều khiển cốt lõi thành ma trận 2x2 tiện dụng ngay trên đầu bảng điều khiển:
+     - Hàng 1: `Bật Teleop` (Checkbox) & `Gripper (Bóp Kẹp)` (Checkbox).
+     - Hàng 2: `Record AI Episode` (Checkbox) & `Hủy Episode (Discard)` (Checkbox dạng tự nhả sau 200ms).
+   - Tối ưu không gian hiển thị, giúp tập trung tối đa vào không gian làm việc 3D và khung camera stream.
+
+10. **Thu Thập & Quản Lý Dữ Liệu AI Chuẩn HDF5:**
+    - Ghi lại chuỗi thao tác đầy đủ: góc khớp (`qpos`), vận tốc (`qvel`), lệnh điều khiển (`action`), trạng thái ngàm kẹp (`gripper`), ảnh camera cổ tay (`images/wrist_camera`), timestamp ở tần số 20Hz.
+    - Tự động đánh dấu kết quả thành công/thất bại (`success=True/False`).
+
+11. **Bộ Công Cụ Kiểm Định & Tái Lập Quỹ Đạo (Data Sanity & Replay):**
+    - `verify_dataset.py`: Quét toàn bộ file HDF5 kiểm tra giá trị NaN/Inf, độ lệch chu kỳ lấy mẫu (dt jitter), kích thước tensor hình ảnh.
+    - `replay_episode.py`: Tái hiện lại quỹ đạo trình diễn ở chế độ Offline Dry-Run hoặc Live Replay gửi lệnh trực tiếp sang robot.
+
+12. **Các Lớp Bảo Vệ An Toàn (Safety Gate & Singularity Guard):**
+    - **Giám sát điểm kỳ dị (Singularity Guard):** Đánh giá ma trận Jacobian thời gian thực, tự động chặn lệnh nếu giá trị suy biến nhỏ nhất $\sigma_{min} < 0.035$.
+    - **Chống chúi cắm bắp tay:** Giới hạn góc nâng vai `shoulder_lift_joint` $\le +0.05$ rad để ngăn ngừa rủi ro đâm bắp tay xuống mặt bàn.
+    - **Giới hạn tốc độ và gia tốc (Rate Limiter):** Kẹp vận tốc góc khớp tối đa $\le 2.0$ rad/s (tối đa 0.1 rad mỗi bước 50ms) để bảo vệ động cơ robot vật lý.
+    - **Phát hiện lật nhánh IK:** Chặn các bước nhảy góc khớp đột ngột (`max_jump > 1.5` rad).
+    - **Giám sát mất kết nối (Timeout Watchdog):** Tự động dừng khẩn cấp robot qua `servoStop` nếu mất tín hiệu VR quá thời gian timeout.
 
 ---
 
@@ -277,11 +293,13 @@ Hệ thống sẽ hiển thị các cổng truy cập:
 ### Bước 3: Điều khiển bằng Viser Web UI (Máy tính)
 1. Mở trình duyệt web trên máy tính và truy cập `http://localhost:8080`.
 2. Kiểm tra mô hình robot 3D hiển thị khớp đúng với trạng thái thực tế của robot.
-3. Tích chọn ô **Bật Điều Khiển (Teleop)**: Nhãn `Status` sẽ chuyển sang hiển thị `Tracking`.
-4. Dùng chuột nhấp và kéo các trục mũi tên hoặc vòng xoay của khối Target Widget 3D: Cánh tay robot sẽ chuyển động bám theo tọa độ đích của chuột trong thời gian thực.
-5. Tích chọn **Gripper (Bóp Kẹp)** để kích hoạt ngàm gắp quả cà chua.
-6. Tích chọn **Record AI Episode** để bắt đầu ghi tập dữ liệu HDF5.
-7. Bấm **Go to Home** khi cần đưa robot về vị trí mặc định an toàn.
+3. **Thao tác trên Bảng điều khiển Lưới 2x2:**
+   - **Bật Điều Khiển (Teleop):** Tích chọn để kích hoạt cánh tay robot bám theo mục tiêu (Nhãn `Status` chuyển sang `Tracking`).
+   - **Gripper (Bóp Kẹp):** Tích chọn để đóng ngàm kẹp gắp quả cà chua (hoặc bỏ chọn để nhả vật thể).
+   - **Record AI Episode:** Tích chọn để bắt đầu ghi chuỗi thao tác phục vụ huấn luyện mô hình Robot AI.
+   - **Hủy Episode (Discard):** Tích chọn khi thực hiện thao tác hỏng; hệ thống sẽ hủy bỏ dữ liệu tập hiện tại và tự động nhả checkbox sau 200ms.
+4. **Điều khiển chuyển động:** Dùng chuột nhấp và kéo các trục mũi tên hoặc vòng xoay của khối Target Widget 3D: Cánh tay robot sẽ chuyển động bám theo tọa độ đích của chuột trong thời gian thực.
+5. **Trở về vị trí an toàn:** Bấm nút **Go to Home** khi cần đưa robot về vị trí mặc định an toàn. Quỹ đạo chuyển động được điều phối mượt mà không rung giật (MoveJ 500Hz), không glitch hình ảnh và tự động kích hoạt lại chế độ Teleop sau khi robot về đích.
 
 ### Bước 4: Điều khiển bằng Kính Meta Quest 3S (WebXR)
 1. Đảm bảo kính Meta Quest 3S và máy tính kết nối cùng mạng Wi-Fi LAN.
@@ -437,9 +455,15 @@ Kiểm tra toàn vẹn các episode: xác minh không có giá trị `NaN`/`Inf`
 | **ServoJ Gain** | `800` | Độ cứng bám quỹ đạo cao, giúp đầu robot bám sát vị trí tay người. |
 | **Vận tốc khớp tối đa (Rate Limiter)** | `2.0` rad/s | Kẹp gia tốc và vận tốc khớp để chống lỗi Protective Stop trên UR. |
 | **Ngưỡng phát hiện vặn xoắn khớp** | `1.5` rad | Chặn những bước nhảy đột ngột do đảo nghiệm IK gần điểm kỳ dị. |
+| **Giới hạn khớp khuỷu (elbow_joint)** | `[-2.80, 2.80]` rad | Cho phép gập sâu tự nhiên (~160 độ) khi hạ thấp gắp cà chua, CuRobo tự quản lý va chạm. |
+| **Giới hạn khớp cổ tay (wrist_1, wrist_2)** | `[-2π, 2π]` rad | Duy trì dải quay đầy đủ của URDF, loại bỏ triệt để hiện tượng đảo nhánh vặn xoắn. |
+| **Giới hạn khớp nâng vai (shoulder_lift)** | `[-π, 0.05]` rad | Chống chúi cắm bắp tay xuống mặt bàn làm việc. |
+| **Thuật toán quy hoạch Home** | URScript `movej` | Chạy trực tiếp ở tần số 500Hz trên URControl (`a=0.8` rad/s², `v=0.5` rad/s), triệt tiêu rung giật. |
+| **Bán kính bo cung waypoints Home** | `0.025` m | Bo cong góc mượt mà qua các điểm trung gian của CuRobo MotionPlanner. |
+| **Khôi phục Teleop sau khi về Home** | Tự động (Zero-Click) | Tự động kết nối lại RTDE và reset mỏ neo tay cầm VR ngay khi robot về đích. |
 | **Số hạt giống CuRobo IK** | 64 seeds | Nâng cao xác suất tìm nghiệm liên tục trên GPU. |
 | **Hệ số phạt lệch nhánh IK** | `50.0` (khi lệch $> 0.8$ rad) | Giữ robot luôn ở nhánh động học đồng nhất với vị trí hiện tại. |
 | **Deadband tĩnh tay cầm VR** | 5 mm (`0.005` m) | Loại bỏ rung tay sinh lý với cơ chế trừ mềm (Soft Deadband). |
 | **Độ lệch tay cầm tối đa (max_delta_m)** | 0.25 m | Phạm vi kéo tay mỗi nhịp bóp cò, tạo cảm giác thoải mái. |
 | **Bộ lọc làm mượt EMA (Alpha)** | 0.35 | Cân bằng giữa độ nhạy phản hồi và chống nhiễu jitter. |
-| **Ngưỡng thời gian Auto-Snap** | 1.2 s | Tự động kéo XYZ về đầu tay máy khi bị kẹt tư thế hoặc vướng vật cản. |
+| **Ngưỡng thời gian Auto-Snap** | 1.2 s | Tự động kéo XYZ về đầu tay máy và reset seed khi bị kẹt tư thế hoặc vướng vật cản. |

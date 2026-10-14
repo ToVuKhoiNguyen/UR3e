@@ -20,7 +20,7 @@
             <div class="launcher-body">
                 <p
                     style="color: #64748b; font-size: 14px; text-align: center; margin-top: 0; margin-bottom: 25px; line-height: 1.5;">
-                    Remote control system for Universal Robots UR3e
+                    Control system for Universal Robots UR3e
                 </p>
                 <div class="info-row">
                     <span class="info-label">Host IP</span>
@@ -77,15 +77,20 @@
                 <div class="sidebar-right">
                     <!-- Khung xem trước Camera Cổ tay tương tự sidebar Viser -->
                     <div class="status-card" id="card-wrist-cam" style="padding: 16px;">
-                        <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <div class="card-title"
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                             <span>WRIST CAMERA LIVE PREVIEW</span>
-                            <span class="badge green" style="font-size: 11px; padding: 2px 8px; font-weight: 600;">LIVE</span>
+                            <span class="badge green"
+                                style="font-size: 11px; padding: 2px 8px; font-weight: 600;">LIVE</span>
                         </div>
                         <div id="cam-stream">
-                            <img id="wrist-cam-img" src="video_feed" alt="Góc nhìn Cổ tay Robot" onload="this.style.display='block'; document.getElementById('cam-placeholder').style.display='none';" onerror="this.onerror=null; this.src='wrist_camera.jpg';" />
+                            <img id="wrist-cam-img" src="video_feed" alt="Góc nhìn Cổ tay Robot"
+                                onload="this.style.display='block'; document.getElementById('cam-placeholder').style.display='none';"
+                                onerror="this.onerror=null; this.src='wrist_camera.jpg';" />
                             <span id="cam-placeholder" style="display: none;">[ Đang chờ luồng video... ]</span>
                         </div>
-                        <div style="margin-top: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #64748b; font-weight: 500;">
+                        <div
+                            style="margin-top: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #64748b; font-weight: 500;">
                             <span>Góc nhìn Cổ tay Robot</span>
                             <span style="font-size: 11px; color: #94a3b8;">Eye-in-Hand (640x480)</span>
                         </div>

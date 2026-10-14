@@ -44,11 +44,11 @@ IK_RETURN_SEEDS = 5                # Number of IK solutions to evaluate
 # within URDF range (±2π). Clamping to ±180° keeps motion safe and predictable.
 UR3E_LIMITS = [
     (-2 * math.pi, 2 * math.pi),  # shoulder_pan_joint   — ±360°
-    (-2 * math.pi, 2 * math.pi),  # shoulder_lift_joint  — ±360°
-    (-2 * math.pi, 2 * math.pi),  # elbow_joint          — ±360°
-    (-2 * math.pi, 2 * math.pi),  # wrist_1_joint        — ±360°
-    (-2 * math.pi, 2 * math.pi),  # wrist_2_joint        — ±360°
-    (-4 * math.pi, 4 * math.pi),  # wrist_3_joint        — Unlimited (set to ±720° for safety)
+    (-math.pi, 0.05),             # shoulder_lift_joint  — [-180°, ~3°] vươn tự nhiên, chống chúi lật bàn
+    (-2.80, 2.80),                # elbow_joint          — Cho phép gập sâu tự nhiên (-160° đến 160°), CuRobo tự quản lý va chạm
+    (-2 * math.pi, 2 * math.pi),  # wrist_1_joint        — Cho phép quay tự nhiên tránh đảo nhánh IK gây vặn xoắn
+    (-2 * math.pi, 2 * math.pi),  # wrist_2_joint        — Cho phép quay tự nhiên tránh đảo nhánh IK gây vặn xoắn
+    (-4 * math.pi, 4 * math.pi),  # wrist_3_joint        — ±720°
 ]
 
 # ===========================================================================
@@ -84,7 +84,6 @@ def validate_joints(q: list) -> bool:
     """Return True if all joints are within UR3E_LIMITS. Rejects unsafe solutions."""
     for i, (lo, hi) in enumerate(UR3E_LIMITS):
         if not (lo <= q[i] <= hi):
-            print(f"[Validate] Joint {i} = {q[i]:.4f} out of safe range [{lo:.2f}, {hi:.2f}]")
             return False
     return True
 
@@ -199,9 +198,10 @@ class CuRoboIK:
     def __init__(self, num_seeds: int = 64, return_seeds: int = 16, scene_file: Optional[str] = None):
         print(f"[cuRobo] Initializing IK solver for UR3e (scene: {scene_file})...")
         if scene_file:
+            scene_path = os.path.abspath(scene_file)
             self.cfg = InverseKinematicsCfg.create(
                 robot=ROBOT_CONFIG,
-                scene_model=scene_file,
+                scene_model=scene_path,
                 num_seeds=num_seeds,
             )
         else:
