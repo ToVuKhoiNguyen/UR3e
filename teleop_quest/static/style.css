@@ -59,7 +59,7 @@ button {
     height: 100vh;
     justify-content: center;
     align-items: center;
-    pointer-events: none;
+    pointer-events: auto; /* Mặc định cho phép tia laser tương tác trong Edit Mode */
     z-index: 9999;
 }
 
@@ -73,9 +73,24 @@ button {
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
     display: flex;
     flex-direction: column;
-    /* Xuyên thấu thao tác tay cầm VR để điều khiển Robot */
-    pointer-events: none;
+    pointer-events: auto; /* Mặc định mở tương tác cho Edit Mode */
     overflow: hidden;
+    transition: opacity 0.2s ease;
+}
+
+/* Drive Mode: Màn hình xuyên thấu để tia laser tay cầm tự do lái robot */
+#cockpit-panel.drive-mode {
+    pointer-events: none;
+    opacity: 0.92;
+}
+
+#cockpit-panel.drive-mode .cockpit-header {
+    pointer-events: none;
+}
+
+#cockpit-panel.drive-mode #btn-toggle-ui,
+#cockpit-panel.drive-mode #btn-exit-vr {
+    pointer-events: auto; /* Cho phép bấm lại nút để chuyển chế độ hoặc thoát VR */
 }
 
 /* Header */
@@ -247,20 +262,28 @@ button {
 
 #cam-stream {
     width: 100%;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: 4 / 3;
     flex: none;
-    background: #1e293b;
-    border: none;
-    border-radius: 12px;
-    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+    background: #0f172a;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.15);
     display: flex;
     align-items: center;
     justify-content: center;
     color: #94a3b8;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 500;
     overflow: hidden;
     position: relative;
+}
+
+#cam-stream img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    background: #0f172a;
 }
 
 #viser-view {

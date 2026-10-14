@@ -31,7 +31,7 @@ from teleop_quest.timeout_watchdog import TimeoutWatchdog
 from teleop_quest.viser_ui import TeleopViserUI
 from teleop_quest.home_planner import HomePlanner
 from teleop_quest.grasp_simulator import GraspSimulator
-from teleop_quest.synthetic_camera import SyntheticWristCamera
+from teleop_quest.camera_driver import create_wrist_camera
 
 POLL_SLEEP = 0.05
 ROBOT_CONFIG = "/home/nguyen/ur_ws/curobo_ursim/assets/ur3e_custom.yml"
@@ -47,6 +47,14 @@ def main():
     print(" KHỞI ĐỘNG HỆ THỐNG VR TELEOP (META QUEST 3S) ")
     print("=" * 60)
 
+    import argparse
+    parser = argparse.ArgumentParser(description="UR3e WebXR Teleoperation")
+    parser.add_argument("--robot-ip", type=str, default=os.environ.get("ROBOT_IP", "127.0.0.1"), help="Địa chỉ IP của Robot UR3e thật hoặc URSim (mặc định: 127.0.0.1)")
+    parser.add_argument("--camera", type=str, choices=["synthetic", "real"], default="synthetic", help="Nguồn camera: synthetic (mô phỏng) hoặc real (camera thật)")
+    parser.add_argument("--camera-device", type=int, default=0, help="Device ID của camera thật (mặc định: 0)")
+    args, _ = parser.parse_known_args()
+    os.environ["ROBOT_IP"] = args.robot_ip
+
     # 1. Khởi động mạng và máy chủ WebXR
     local_ip = get_local_ip()
     base_dir = os.path.dirname(os.path.dirname(__file__))
@@ -56,7 +64,7 @@ def main():
 
 
     # 2. Khởi động Controller Robot, An toàn & Data Logger
-    print("[Hệ thống] Đang kết nối CuRobo và URSim...")
+    print(f"[Hệ thống] Đang kết nối CuRobo và Robot UR3e tại IP: {args.robot_ip}...")
     ctrl = CuRoboURSim(scene_file=SCENE_CONFIG)
     for _ in range(10):
         if np.linalg.norm(ctrl.joints()) > 0.01:
@@ -88,9 +96,9 @@ def main():
     )
     ui.set_episodes(logger.current_episode_idx)
 
-    # Khởi tạo mô phỏng gắp nhặt Cà chua 3D & Camera ảo Wrist
+    # Khởi tạo mô phỏng gắp nhặt Cà chua 3D & Camera Wrist (Mô phỏng hoặc Camera thật)
     grasp_sim = GraspSimulator(ui.server, pick_pos=pick_pos, place_pos=place_pos)
-    wrist_cam = SyntheticWristCamera(width=640, height=480)
+    wrist_cam = create_wrist_camera(camera_type=args.camera, device_index=args.camera_device, width=640, height=480)
 
     # 4. Thiết lập nguồn tọa độ VR & Pipeline Teleop
     widget_pose_source = WidgetPoseSource(ui.target_widget)
@@ -155,7 +163,6 @@ def main():
         )
 
 
-
     # Xử lý tín hiệu tắt an toàn
     def handle_sigint(sig, frame):
         print("\n[Hệ thống] Đang tắt an toàn...")
@@ -173,6 +180,7 @@ def main():
     print("=" * 40 + "\n")
 
     _last_teleop_state = False
+    _last_quest_drive_mode = quest_server.get_drive_mode()
     _frame_count = 0
 
     # 7. Vòng lặp điều khiển chính (20Hz)
@@ -183,6 +191,9 @@ def main():
         if quest_server.check_and_clear_estop():
             teleop.enabled = False
             ui.cb_teleop.value = False
+            quest_server.set_drive_mode(False)
+            _last_teleop_state = False
+            _last_quest_drive_mode = False
             try:
                 executor._ctrl.stopJ(2.0)
             except Exception:
@@ -193,18 +204,31 @@ def main():
         # B. Cập nhật trạng thái kết nối
         ui.set_connected(quest_server.is_connected())
 
-        # C. Xử lý bật/tắt Teleop
+        # C. Xử lý bật/tắt Teleop (Đồng bộ giữa VR Quest và Viser Dashboard)
+        if quest_server.is_connected():
+            curr_quest_mode = quest_server.get_drive_mode()
+            if curr_quest_mode != _last_quest_drive_mode:
+                _last_quest_drive_mode = curr_quest_mode
+                ui.cb_teleop.value = curr_quest_mode
+
         if ui.cb_teleop.value != _last_teleop_state:
-            teleop.enabled = ui.cb_teleop.value
             _last_teleop_state = ui.cb_teleop.value
+            teleop.enabled = ui.cb_teleop.value
+            quest_server.set_drive_mode(ui.cb_teleop.value)
+            _last_quest_drive_mode = ui.cb_teleop.value
+
             if teleop.enabled:
-                print("[VR] KÍCH HOẠT ĐIỀU KHIỂN.")
+                print("[Teleop] KÍCH HOẠT ĐIỀU KHIỂN.")
+                pose_source.reset_anchor()
                 executor.connect()
-                watchdog.arm()
+                if quest_server.is_connected():
+                    watchdog.arm()
+                ui.set_status("Tracking")
             else:
-                print("[VR] HỦY KÍCH HOẠT ĐIỀU KHIỂN.")
+                print("[Teleop] HỦY KÍCH HOẠT ĐIỀU KHIỂN.")
                 executor.disconnect()
                 watchdog.disarm()
+                ui.set_status("Tắt")
 
         # D. Lấy trạng thái góc khớp và FK của robot thực tế
         try:
@@ -310,29 +334,29 @@ def main():
                 print(f"[Lỗi Điều khiển] {e}")
                 traceback.print_exc()
         elif not teleop.enabled:
-            ui.set_status("Tắt")
+            curr_st = str(ui.ui_status.value)
+            if not curr_st.startswith("Lỗi") and not curr_st.startswith("EMERGENCY") and not "Error" in curr_st:
+                ui.set_status("Tắt")
 
         # E. Cập nhật giao diện 3D và Luồng Camera trực tiếp (Luôn chạy bất kể Teleop bật hay tắt)
         if fk_res is not None:
             # Đồng bộ dáng robot thực tế lên Viser 3D
             ui.update_robot_state(q_real)
 
-            # Render góc nhìn từ Camera ảo gắn cổ tay robot (Wrist Eye-in-Hand) ở 10 FPS
-            _frame_count += 1
-            if _frame_count % 2 == 0:
-                current_grip = is_grip_pressed if teleop.enabled else bool(ui.cb_gripper.value)
-                cam_img = wrist_cam.render(
-                    tool_pos=fk_res["pos"],
-                    tool_quat=fk_res["quat"],
-                    tomato_pos=grasp_sim.tomato_pos,
-                    basket_pos=grasp_sim.place_basket_pos,
-                    gripper_closed=current_grip
-                )
-                preview_frame = wrist_cam.add_osd_preview(cam_img, current_grip)
-                # 1. Cập nhật khung xem trước trên sidebar Viser
-                ui.update_cam_preview(preview_frame)
-                # 2. Phát luồng trực tiếp sang khung CAMERA STREAM trên VR Dashboard
-                quest_server.send_camera_frame(preview_frame)
+            # Render luồng trực tiếp từ Camera cổ tay (Mô phỏng 3D hoặc Camera thật) thời gian thực ở 20 FPS
+            current_grip = is_grip_pressed if teleop.enabled else bool(ui.cb_gripper.value)
+            cam_img = wrist_cam.get_frame(
+                tool_pos=fk_res["pos"],
+                tool_quat=fk_res["quat"],
+                tomato_pos=grasp_sim.tomato_pos,
+                basket_pos=grasp_sim.place_basket_pos,
+                gripper_closed=current_grip
+            )
+            preview_frame = wrist_cam.add_osd_preview(cam_img, current_grip)
+            # 1. Cập nhật khung xem trước trên sidebar Viser
+            ui.update_cam_preview(preview_frame)
+            # 2. Phát luồng trực tiếp sang khung CAMERA STREAM trên VR Dashboard và MJPEG
+            quest_server.send_camera_frame(preview_frame)
 
         # Bù trừ thời gian trễ thực tế để duy trì chính xác tần số 20Hz (50ms/bước)
         elapsed = time.perf_counter() - loop_start_time

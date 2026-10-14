@@ -49,14 +49,7 @@ class GraspSimulator:
             color=(185, 175, 160),
             position=(0.20, 0.0, -0.02)
         )
-
-        # 4. Sinh vật cản vách ngăn 3D (đồng bộ với CuRobo obstacle_scene.yml)
-        self.wall_mesh = self.server.scene.add_box(
-            "/world/obstacles/wall",
-            dimensions=(0.025, 0.08, 0.10),
-            color=(230, 130, 40),
-            position=(0.25, 0.0, 0.05)
-        )
+        self.wall_mesh = None
 
     def set_position(self, x: float, y: float, z: float = 0.035):
         """Đặt vị trí quả cà chua tại tọa độ bất kỳ để thử nghiệm"""

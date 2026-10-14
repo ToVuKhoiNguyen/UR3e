@@ -23,8 +23,9 @@ import rtde_receive
 
 # ===========================================================================
 # Configuration
-# ===========================================================================
-ROBOT_IP        = os.environ.get("ROBOT_IP", "127.0.0.1")
+def get_robot_ip() -> str:
+    return os.environ.get("ROBOT_IP", "127.0.0.1")
+
 _BASE_DIR       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROBOT_CONFIG    = os.path.join(_BASE_DIR, "assets", "ur3e_custom.yml")
 TCP_LINK        = "tool0"          # End-effector link defined in ur3e.yml
@@ -102,7 +103,7 @@ def setup_ursim(timeout: float = 35.0) -> bool:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(3.0)
-            s.connect((ROBOT_IP, DASHBOARD_PORT))
+            s.connect((get_robot_ip(), DASHBOARD_PORT))
             time.sleep(0.3)
             try:
                 s.recv(4096)
@@ -126,6 +127,8 @@ def setup_ursim(timeout: float = 35.0) -> bool:
             print(f"[URSim] Trạng thái: Mode={mode}, Safety={safety}")
 
             if "RUNNING" in mode:
+                # Dừng script cũ đang chạy trên robot để giải phóng thanh ghi RTDE
+                _cmd("stop", 0.2)
                 s.close()
                 return True
 
@@ -168,7 +171,7 @@ def setup_ursim(timeout: float = 35.0) -> bool:
 def send_urscript(script: str, settle: float = 0.3) -> None:
     """Upload URScript via secondary interface (port 30002). No Remote Control mode needed."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect((ROBOT_IP, SECONDARY_PORT))
+    s.connect((get_robot_ip(), SECONDARY_PORT))
     time.sleep(0.2)
     s.recv(4096)
     s.sendall(script.encode())
@@ -303,7 +306,7 @@ class CuRoboURSim:
             raise RuntimeError("Robot not RUNNING. Check URSim container.")
 
         print("[Setup] Connecting RTDEReceive...")
-        self.rr = rtde_receive.RTDEReceiveInterface(ROBOT_IP)
+        self.rr = rtde_receive.RTDEReceiveInterface(get_robot_ip())
         q = self.rr.getActualQ()
         print(f"[Setup] Connected. Joints: {[round(j, 4) for j in q]}")
 

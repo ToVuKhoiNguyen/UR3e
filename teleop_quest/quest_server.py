@@ -8,28 +8,35 @@ import time
 import websockets
 
 class QuestServer:
-    def __init__(self, cert: str, key: str, host: str = "0.0.0.0", http_port: int = 8443, ws_port: int = 8444):
+    def __init__(self, cert: str, key: str, host: str = "0.0.0.0", http_port: int = 8443, ws_port: int = 8444, ws_port_plain: int = 8445):
         self.cert = cert
         self.key = key
         self.host = host
         self.http_port = http_port
         self.ws_port = ws_port
+        self.ws_port_plain = ws_port_plain
 
         self._lock = threading.Lock()
+        self._frame_cond = threading.Condition(self._lock)
+        self._running = True
         self._latest_frame = None
         self._last_seen = 0.0
         self._connected = False
-        self._active_ws = None
+        self._clients = set()
         self._loop = None
         self._estop_triggered = False
         self._latest_jpeg = None
+        self._drive_mode = False
+
+        self.static_dir = os.path.join(os.path.dirname(__file__), "static")
+        self._cam_file = os.path.join(self.static_dir, "wrist_camera.jpg")
 
     def start(self):
         # Khởi động HTTPS server (chạy daemon thread)
         http_thread = threading.Thread(target=self._run_http, daemon=True)
         http_thread.start()
 
-        # Khởi động WSS server (chạy daemon thread)
+        # Khởi động WSS / WS server (chạy daemon thread)
         ws_thread = threading.Thread(target=self._run_ws, daemon=True)
         ws_thread.start()
 
@@ -49,6 +56,24 @@ class QuestServer:
         with self._lock:
             return self._connected
             
+    def get_drive_mode(self) -> bool:
+        with self._lock:
+            return self._drive_mode
+
+    def set_drive_mode(self, enabled: bool):
+        """Cập nhật trạng thái Drive Mode từ hệ thống và đồng bộ sang kính Quest."""
+        with self._lock:
+            self._drive_mode = bool(enabled)
+            clients = list(self._clients)
+            loop = self._loop
+        if clients and loop:
+            msg = json.dumps({"type": "teleop_state", "enabled": bool(enabled)})
+            for ws in clients:
+                try:
+                    asyncio.run_coroutine_threadsafe(ws.send(msg), loop)
+                except Exception:
+                    pass
+
     def check_and_clear_estop(self) -> bool:
         with self._lock:
             if self._estop_triggered:
@@ -58,20 +83,18 @@ class QuestServer:
 
     def send_haptic(self, intensity: float = 1.0, duration: float = 100):
         with self._lock:
-            ws = self._active_ws
+            clients = list(self._clients)
             loop = self._loop
-        if ws and loop:
-            try:
-                msg = json.dumps({"type": "haptic", "intensity": intensity, "duration": duration})
-                asyncio.run_coroutine_threadsafe(ws.send(msg), loop)
-            except Exception:
-                pass
+        if clients and loop:
+            msg = json.dumps({"type": "haptic", "intensity": intensity, "duration": duration})
+            for ws in clients:
+                try:
+                    asyncio.run_coroutine_threadsafe(ws.send(msg), loop)
+                except Exception:
+                    pass
 
-    def send_camera_frame(self, frame_rgb, quality: int = 55):
-        """Mã hóa frame ảnh RGB thành JPEG base64 và gửi tới client WebXR qua WebSocket."""
-        with self._lock:
-            ws = self._active_ws
-            loop = self._loop
+    def send_camera_frame(self, frame_rgb, quality: int = 75):
+        """Mã hóa frame ảnh RGB thành JPEG, lưu cache đĩa và gửi tới client qua WebSocket & MJPEG Stream."""
         try:
             import cv2
             import base64
@@ -84,19 +107,37 @@ class QuestServer:
                 jpeg_bytes = encimg.tobytes()
                 with self._lock:
                     self._latest_jpeg = jpeg_bytes
-                if ws and loop:
+                    clients = list(self._clients)
+                    loop = self._loop
+                    self._frame_cond.notify_all()
+
+                # Lưu ảnh trực tiếp ra static/wrist_camera.jpg phục vụ chế độ xem file:/// cục bộ
+                try:
+                    tmp_file = self._cam_file + ".tmp"
+                    with open(tmp_file, "wb") as f:
+                        f.write(jpeg_bytes)
+                    os.replace(tmp_file, self._cam_file)
+                except Exception:
+                    pass
+
+                # Phát luồng trực tiếp qua WebSocket tới các client đang kết nối
+                if clients and loop:
                     b64_str = base64.b64encode(jpeg_bytes).decode('utf-8')
                     msg = json.dumps({"type": "camera", "image": b64_str})
-                    asyncio.run_coroutine_threadsafe(ws.send(msg), loop)
+                    for ws in clients:
+                        try:
+                            asyncio.run_coroutine_threadsafe(ws.send(msg), loop)
+                        except Exception:
+                            pass
         except Exception:
             pass
 
     def _run_http(self):
-        # Cấu hình HTTPServer
+        # Cấu hình HTTPServer đa luồng (ThreadingHTTPServer)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(self.cert, self.key)
 
-        static_dir = os.path.join(os.path.dirname(__file__), "static")
+        static_dir = self.static_dir
         server_self = self
 
         class RequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -104,13 +145,45 @@ class QuestServer:
                 super().__init__(*args, directory=static_dir, **kwargs)
 
             def do_GET(self):
-                if self.path == "/wrist_camera.jpg":
+                req_path = self.path.split("?")[0]
+                # 1. Luồng video MJPEG liên tục thời gian thực (Native Realtime Stream)
+                if req_path in ("/video_feed", "/stream.mjpg", "/wrist_camera_stream"):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                    self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                    self.send_header("Pragma", "no-cache")
+                    self.send_header("Expires", "0")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    last_sent = None
+                    try:
+                        while server_self._running:
+                            with server_self._frame_cond:
+                                server_self._frame_cond.wait(timeout=0.1)
+                                jpeg_bytes = server_self._latest_jpeg
+                            if jpeg_bytes and jpeg_bytes != last_sent:
+                                last_sent = jpeg_bytes
+                                self.wfile.write(b"--frame\r\n")
+                                self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                                self.wfile.write(f"Content-Length: {len(jpeg_bytes)}\r\n\r\n".encode())
+                                self.wfile.write(jpeg_bytes)
+                                self.wfile.write(b"\r\n")
+                                self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, Exception):
+                        pass
+                    return
+
+                # 2. Ảnh đơn chụp nhanh (Snapshot)
+                if req_path == "/wrist_camera.jpg" or req_path.endswith("wrist_camera.jpg"):
                     with server_self._lock:
                         jpeg_bytes = server_self._latest_jpeg
                     if jpeg_bytes:
                         self.send_response(200)
                         self.send_header("Content-Type", "image/jpeg")
                         self.send_header("Content-Length", str(len(jpeg_bytes)))
+                        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                        self.send_header("Pragma", "no-cache")
+                        self.send_header("Expires", "0")
                         self.send_header("Access-Control-Allow-Origin", "*")
                         self.end_headers()
                         self.wfile.write(jpeg_bytes)
@@ -125,7 +198,7 @@ class QuestServer:
                 pass  # Tắt log mặc định để tránh spam terminal
 
         try:
-            httpd = http.server.HTTPServer((self.host, self.http_port), RequestHandler)
+            httpd = http.server.ThreadingHTTPServer((self.host, self.http_port), RequestHandler)
             httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
             print(f"[Quest] HTTPS Server running at https://{self.host}:{self.http_port}")
             httpd.serve_forever()
@@ -145,12 +218,15 @@ class QuestServer:
         context.load_cert_chain(self.cert, self.key)
 
         async def handler(websocket):
-            remote_ip = websocket.remote_address[0]
+            remote_ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
             print(f"[Quest] WebSocket connected from {remote_ip}")
             with self._lock:
                 self._connected = True
-                self._active_ws = websocket
+                self._clients.add(websocket)
+                current_mode = self._drive_mode
             try:
+                # Gửi trạng thái Teleop hiện tại ngay khi client vừa kết nối
+                await websocket.send(json.dumps({"type": "teleop_state", "enabled": current_mode}))
                 async for message in websocket:
                     try:
                         data = json.loads(message)
@@ -158,28 +234,33 @@ class QuestServer:
                             if data.get("type") == "estop":
                                 self._estop_triggered = True
                             elif data.get("type") == "ui_state":
-                                self._drive_mode = data.get("drive_mode", False)
+                                self._drive_mode = bool(data.get("drive_mode", False))
                             else:
                                 self._latest_frame = data
                                 self._last_seen = time.time()
                     except json.JSONDecodeError:
                         pass
-            except websockets.exceptions.ConnectionClosed:
-                print(f"[Quest] WebSocket disconnected from {remote_ip}")
+            except (websockets.exceptions.ConnectionClosed, Exception):
+                pass
             finally:
+                print(f"[Quest] WebSocket disconnected from {remote_ip}")
                 with self._lock:
-                    self._connected = False
-                    self._latest_frame = None
-                    if self._active_ws == websocket:
-                        self._active_ws = None
+                    self._clients.discard(websocket)
+                    if not self._clients:
+                        self._connected = False
+                        self._latest_frame = None
+                        self._drive_mode = False
 
         try:
+            # Chạy đồng thời WSS (cổng 8444 cho Quest WebXR) và WS (cổng 8445 cho PC/local preview)
             async with websockets.serve(handler, self.host, self.ws_port, ssl=context):
-                print(f"[Quest] WSS Server running at wss://{self.host}:{self.ws_port}")
-                await asyncio.Future()  # run forever
+                async with websockets.serve(handler, self.host, self.ws_port_plain):
+                    print(f"[Quest] WSS Server running at wss://{self.host}:{self.ws_port}")
+                    print(f"[Quest] WS Server (Plain) running at ws://{self.host}:{self.ws_port_plain}")
+                    await asyncio.Future()  # run forever
         except OSError as e:
             if e.errno == 98:
-                print(f"[Quest] Lỗi: Cổng {self.ws_port} đã bị chiếm dụng. Vui lòng tắt các tiến trình cũ.")
+                print(f"[Quest] Lỗi: Cổng WebSocket ({self.ws_port} hoặc {self.ws_port_plain}) đã bị chiếm dụng.")
             else:
                 print(f"[Quest] WSS Error: {e}")
 

@@ -3,3 +3,4 @@ __pycache__/
 certs/
 logs/
 .venv/
+teleop_quest/static/wrist_camera.jpg

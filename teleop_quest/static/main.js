@@ -1,4 +1,4 @@
-        document.getElementById('host-ip').innerText = window.location.hostname;
+        document.getElementById('host-ip').innerText = window.location.hostname || '127.0.0.1 (Local Preview)';
         const statusDiv = document.getElementById('status');
         const btnEnterVR = document.getElementById('btn-enter-vr');
         const btnExitVR = document.getElementById('btn-exit-vr');
@@ -16,27 +16,50 @@
         const elValQy = document.getElementById('val-qy');
         const elValQz = document.getElementById('val-qz');
         const elValQw = document.getElementById('val-qw');
+        const elValMode = document.getElementById('val-mode');
 
         let ws = null;
         let xrSession = null;
         let xrRefSpace = null;
         let glContext = null;
         let activeHandedness = 'right';
+        let lastDriveTogglePressed = false;
+
+        function updateCamDisplay(src) {
+            const camImg = document.getElementById('wrist-cam-img');
+            const placeholder = document.getElementById('cam-placeholder');
+            if (camImg) {
+                camImg.src = src;
+                camImg.style.display = 'block';
+            }
+            if (placeholder) {
+                placeholder.style.display = 'none';
+            }
+        }
 
         function connectWebSocket() {
             let host = window.location.hostname || '127.0.0.1';
-            const wsUrl = `wss://${host}:8444`;
-            ws = new WebSocket(wsUrl);
+            let isHttps = window.location.protocol === 'https:';
+            // Meta Quest WebXR chạy https: -> dùng wss:// cổng 8444
+            // Xem PC (file:/// hoặc http:) -> dùng ws:// cổng 8445 không cần chứng chỉ SSL tự ký
+            const wsUrl = isHttps ? `wss://${host}:8444` : `ws://${host}:8445`;
+            
+            try {
+                ws = new WebSocket(wsUrl);
+            } catch (err) {
+                console.error("Lỗi khởi tạo WebSocket:", err);
+                return;
+            }
 
             ws.onopen = () => {
-                statusDiv.innerText = "Connected (Secure)";
+                statusDiv.innerText = isHttps ? "Connected (Secure WSS)" : "Connected (Local WS)";
                 statusDiv.classList.remove("warning");
                 statusDiv.classList.add("success");
                 checkWebXR();
             };
 
             ws.onerror = (err) => {
-                statusDiv.innerText = "Connection Error on port 8444";
+                statusDiv.innerText = isHttps ? "Connection Error on port 8444" : "Connection Error on port 8445";
                 statusDiv.classList.remove("success");
                 statusDiv.classList.add("warning");
                 console.error("WS Error", err);
@@ -51,17 +74,11 @@
                                 source.gamepad.hapticActuators[0].pulse(data.intensity, data.duration);
                             }
                         }
+                    } else if (data.type === 'teleop_state') {
+                        setDriveMode(Boolean(data.enabled), false);
                     } else if (data.type === 'camera' && data.image) {
                         lastCamUpdate = Date.now();
-                        const camImg = document.getElementById('wrist-cam-img');
-                        const placeholder = document.getElementById('cam-placeholder');
-                        if (camImg) {
-                            camImg.src = 'data:image/jpeg;base64,' + data.image;
-                            camImg.style.display = 'block';
-                        }
-                        if (placeholder) {
-                            placeholder.style.display = 'none';
-                        }
+                        updateCamDisplay('data:image/jpeg;base64,' + data.image);
                     }
                 } catch (e) { console.error("WS error", e); }
             };
@@ -105,33 +122,51 @@
             }
         });
 
-        // Khóa màn hình để xuyên thấu tia laser, giúp bóp cò điều khiển robot mà vẫn xem được UI
+        // Quản lý chuyển đổi giữa Edit Mode (chỉnh UI) và Drive Mode (lái Robot)
         let uiLocked = false;
         const btnToggleUI = document.getElementById('btn-toggle-ui');
-        const cockpitBody = document.querySelector('.cockpit-body');
-        
-        btnToggleUI.addEventListener('click', () => {
-            uiLocked = !uiLocked;
-            
-            // Báo cho Python server biết trạng thái Drive Mode
-            if (ws && ws.readyState === WebSocket.OPEN) {
+        const cockpitPanel = document.getElementById('cockpit-panel');
+
+        function setDriveMode(locked, notifyServer = true) {
+            uiLocked = Boolean(locked);
+            const overlay = document.getElementById('vr-overlay');
+
+            if (uiLocked) {
+                if (cockpitPanel) cockpitPanel.classList.add('drive-mode');
+                if (overlay) overlay.style.pointerEvents = 'none';
+                btnToggleUI.style.pointerEvents = 'auto';
+                btnExitVR.style.pointerEvents = 'auto';
+                btnToggleUI.innerHTML = '<span></span> Unlock UI (Edit Mode) [B/Y]';
+                btnToggleUI.style.background = '#10b981';
+                if (elValMode) {
+                    elValMode.innerText = "Drive Mode";
+                    elValMode.className = "badge green";
+                }
+            } else {
+                if (cockpitPanel) cockpitPanel.classList.remove('drive-mode');
+                if (overlay) overlay.style.pointerEvents = 'auto';
+                btnToggleUI.style.pointerEvents = 'auto';
+                btnExitVR.style.pointerEvents = 'auto';
+                btnToggleUI.innerHTML = '<span></span> Lock UI (Drive Mode) [B/Y]';
+                btnToggleUI.style.background = '#f59e0b';
+                if (elValMode) {
+                    elValMode.innerText = "Edit Mode";
+                    elValMode.className = "badge orange";
+                }
+            }
+
+            // Đồng bộ trạng thái lên Python server
+            if (notifyServer && ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({
                     type: 'ui_state',
                     drive_mode: uiLocked
                 }));
             }
-            
-            if (uiLocked) {
-                document.getElementById('vr-overlay').style.pointerEvents = 'none';
-                btnToggleUI.style.pointerEvents = 'auto'; // Cho phép bấm lại nút này
-                btnExitVR.style.pointerEvents = 'auto'; // Cho phép bấm exit
-                btnToggleUI.innerHTML = 'Unlock UI (Edit Mode)';
-                btnToggleUI.style.background = '#4CAF50';
-            } else {
-                document.getElementById('vr-overlay').style.pointerEvents = 'auto';
-                btnToggleUI.innerHTML = 'Lock UI (Drive Mode)';
-                btnToggleUI.style.background = '#f59e0b';
-            }
+        }
+
+        btnToggleUI.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setDriveMode(!uiLocked, true);
         });
 
         btnEnterVR.addEventListener('click', () => {
@@ -165,6 +200,7 @@
             btnEnterVR.style.display = 'none';
             document.getElementById('launcher-screen').style.display = 'none';
             vrOverlay.style.display = 'flex'; // Hiện Overlay bằng flex để căn giữa
+            setDriveMode(uiLocked, false);
             statusDiv.innerText = "In VR Session";
 
             session.addEventListener('end', onSessionEnded);
@@ -234,14 +270,27 @@
                     let triggerPressed = false;
                     let gripPressed = false;
                     let gripperBtnPressed = false;
+                    let driveTogglePressed = false;
                     
                     if (activeSource.gamepad && activeSource.gamepad.buttons) {
+                        // Button 0: Index Trigger (bóp trỏ - tịnh tiến)
                         if (activeSource.gamepad.buttons.length > 0) triggerPressed = activeSource.gamepad.buttons[0].pressed;
+                        // Button 1: Hand Grip (bóp hông - xoay)
                         if (activeSource.gamepad.buttons.length > 1) gripPressed = activeSource.gamepad.buttons[1].pressed;
-                        // Nút A (phải) / X (trái) (button 4) hoặc B/Y (button 5) dùng riêng để Kẹp/Nhả Gripper
+                        // Button 4: Nút A (tay phải) hoặc Nút X (tay trái) - Kẹp/Nhả Gripper
                         if (activeSource.gamepad.buttons.length > 4) gripperBtnPressed = activeSource.gamepad.buttons[4].pressed;
-                        if (activeSource.gamepad.buttons.length > 5 && !gripperBtnPressed) gripperBtnPressed = activeSource.gamepad.buttons[5].pressed;
+                        // Button 5: Nút B (tay phải) hoặc Nút Y (tay trái) - Phím cứng chuyển đổi Drive Mode
+                        if (activeSource.gamepad.buttons.length > 5) driveTogglePressed = activeSource.gamepad.buttons[5].pressed;
                     }
+
+                    // Xử lý sườn lên nút B/Y: bấm 1 lần để chuyển Drive Mode và rung nhẹ xác nhận
+                    if (driveTogglePressed && !lastDriveTogglePressed) {
+                        setDriveMode(!uiLocked, true);
+                        if (activeSource.gamepad && activeSource.gamepad.hapticActuators && activeSource.gamepad.hapticActuators.length > 0) {
+                            activeSource.gamepad.hapticActuators[0].pulse(0.7, 120);
+                        }
+                    }
+                    lastDriveTogglePressed = driveTogglePressed;
 
                     let pos = pose.transform.position;
                     let quat = pose.transform.orientation;
@@ -253,7 +302,8 @@
                         quat: [quat.w, quat.x, quat.y, quat.z],
                         trigger: triggerPressed,
                         grip: gripPressed,
-                        gripper_btn: gripperBtnPressed
+                        gripper_btn: gripperBtnPressed,
+                        drive_mode: uiLocked
                     }));
                     
                     let handName = activeSource.handedness === 'right' ? "Right Hand" : (activeSource.handedness === 'left' ? "Left Hand" : "Unknown");
@@ -300,25 +350,31 @@
 
         // Quản lý luồng stream camera ảo cổ tay
         let lastCamUpdate = 0;
-        const wristCamImg = document.getElementById('wrist-cam-img');
-        const camPlaceholder = document.getElementById('cam-placeholder');
+        let isPolling = false;
 
-        // Định kỳ lấy ảnh camera qua HTTP nếu WebSocket chưa gửi (ví dụ ở màn hình chờ hoặc xem trên PC)
-        setInterval(() => {
-            if (Date.now() - lastCamUpdate > 800) {
-                const pollImg = new Image();
-                pollImg.onload = () => {
-                    if (wristCamImg) {
-                        wristCamImg.src = pollImg.src;
-                        wristCamImg.style.display = 'block';
-                    }
-                    if (camPlaceholder) {
-                        camPlaceholder.style.display = 'none';
-                    }
-                };
-                pollImg.src = `/wrist_camera.jpg?t=${Date.now()}`;
-            }
-        }, 150);
+        function pollCameraFrame() {
+            if (Date.now() - lastCamUpdate < 250 || isPolling) return;
+            isPolling = true;
+
+            const pollImg = new Image();
+            pollImg.onload = () => {
+                isPolling = false;
+                updateCamDisplay(pollImg.src);
+            };
+            pollImg.onerror = () => {
+                isPolling = false;
+                // Nếu đang mở bằng file:/// và chưa nạp được, thử fallback qua cổng HTTPS 8443
+                if (window.location.protocol === 'file:' && !pollImg.hasFallenBack) {
+                    pollImg.hasFallenBack = true;
+                    let host = window.location.hostname || '127.0.0.1';
+                    pollImg.src = `https://${host}:8443/wrist_camera.jpg?t=${Date.now()}`;
+                }
+            };
+            // Đường dẫn tương đối không có dấu gạch chéo đầu giúp tương thích hoàn hảo cả file:/// lẫn http/https
+            pollImg.src = `wrist_camera.jpg?t=${Date.now()}`;
+        }
+
+        setInterval(pollCameraFrame, 100);
 
         // Start
         connectWebSocket();

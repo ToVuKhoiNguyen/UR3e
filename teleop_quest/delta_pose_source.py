@@ -39,6 +39,11 @@ class DeltaPoseSource:
         self.out_of_reach_time = 0.0
 
     def get_pose(self):
+        # Không sinh delta pose khi đang ở Edit Mode để tránh di chuyển ngoài ý muốn
+        if hasattr(self.server, "get_drive_mode") and not self.server.get_drive_mode():
+            self._last_button_state = 0
+            return None
+
         frame = self.server.get_frame()
         if not frame:
             return None

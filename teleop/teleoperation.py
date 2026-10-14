@@ -89,9 +89,45 @@ class ServoJExecutor:
         """Khởi tạo RTDEControlInterface. Gọi 1 lần khi bật Teleop."""
         import rtde_control
         if self._ctrl is not None:
-            return
-        self._ctrl = rtde_control.RTDEControlInterface(self.ROBOT_IP)
-        print(f"[ServoJ] RTDEControl connected: {self._ctrl.isConnected()}")
+            try:
+                if self._ctrl.isConnected():
+                    return
+            except Exception:
+                pass
+
+        robot_ip = os.environ.get("ROBOT_IP", self.ROBOT_IP)
+
+        # Dừng script cũ trên robot qua Dashboard (Port 29999) để giải phóng hoàn toàn thanh ghi RTDE
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1.0)
+            s.connect((robot_ip, 29999))
+            s.recv(1024)
+            s.sendall(b"stop\n")
+            time.sleep(0.1)
+            s.recv(1024)
+            s.close()
+        except Exception:
+            pass
+
+        try:
+            self._ctrl = rtde_control.RTDEControlInterface(robot_ip)
+            print(f"[ServoJ] RTDEControl connected: {self._ctrl.isConnected()}")
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "input registers are already in use" in err_msg or "fieldbus" in err_msg:
+                print("[ServoJ] Xung đột thanh ghi, thử dải Upper Range Registers...")
+                try:
+                    flags_upper = int(rtde_control.RTDEControlInterface.FLAG_UPLOAD_SCRIPT) | int(rtde_control.RTDEControlInterface.FLAG_UPPER_RANGE_REGISTERS)
+                    self._ctrl = rtde_control.RTDEControlInterface(robot_ip, -1.0, flags_upper)
+                    print(f"[ServoJ] RTDEControl connected (Upper Range Registers): {self._ctrl.isConnected()}")
+                except Exception as inner_e:
+                    print(f"[ServoJ] Không thể kết nối RTDE Control: {inner_e}")
+                    self._ctrl = None
+            else:
+                print(f"[ServoJ] Lỗi kết nối RTDE Control: {e}")
+                self._ctrl = None
 
     def disconnect(self):
         """Dừng servoJ và ngắt kết nối. Gọi 1 lần khi tắt Teleop."""
