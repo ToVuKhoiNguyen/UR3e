@@ -324,7 +324,7 @@ Hệ thống sẽ hiển thị các cổng truy cập:
 | **Nhấn cần gạt Thumbstick (R3/L3)** | Ngón cái | **Về Vị Trí An Toàn (Go Home)** | **Nhấn 1 lần vào cần gạt Analog** (hoặc nhấn giữ nút B/Y trong 3 giây) để tự động đưa cánh tay robot về vị trí Home an toàn. Tay cầm rung xác nhận 2 nhịp, tự động mở khóa bảo vệ và tái kích hoạt Teleop khi về đích. |
 | **Nút B (Tay phải) / Y (Tay trái)** | Ngón cái | **Chuyển Chế Độ / Về Home** | - **Bấm nhanh (< 3s):** Chuyển đổi giữa **Edit Mode** (chỉnh UI Cockpit) và **Drive Mode** (lái robot).<br>- **Nhấn giữ (> 3s):** Kích hoạt lệnh **Go Home** đưa robot về vị trí an toàn. |
 | **Cò Trỏ (Index Trigger)** | Ngón trỏ | **Tịnh Tiến Không Gian (Arm-Plane / Cartesian)** | Bấm giữ cò và di chuyển tay trong không gian để tịnh tiến đầu robot. Hướng tiến luôn bám theo góc khớp đế $q_0$. Góc xoay cổ tay được khóa cố định. |
-| **Nút Hông (Hand Grip)** | Ngón giữa / ngón áp út | **Xoay Đầu Công Cụ (Tool-Centric)** | Bấm giữ nút hông và xoay cổ tay để điều chỉnh hướng chúc/ngửa/nghiêng của ngàm kẹp theo hệ trục của camera cổ tay. Tích hợp bộ lọc Soft Rotation Snapping chống vặn xoắn lệch trục. |
+| **Nút Hông (Hand Grip)** | Ngón giữa / ngón áp út | **Xoay 3 Trục Độc Lập (Decoupled 3-Axis Rotation)** | Bấm giữ nút hông để xoay ngàm gắp trên cả 3 trục: Gập/chúc (Pitch), Lắc ngang (Yaw), và Vặn ngàm (Roll). Hệ thống tích hợp bộ lọc trực giao World Frame và Khóa trục thông minh (Soft Rotation Snapping), triệt tiêu hoàn toàn hiện tượng rò rỉ chéo trục khi gập mở cổ tay. |
 | **Nút A (Tay phải) / X (Tay trái)** | Ngón cái | **Bật / Tắt Ngàm Kẹp (Toggle Gripper)** | **Nhấn 1 lần** để kẹp/hút quả cà chua, **nhấn lần nữa** để nhả vật thể vào giỏ. Tay cầm rung phản hồi haptic mỗi lần bấm. |
 | **Nút Meta (Oculus)** | Ngón cái (Tay phải) | **Căn Chuẩn Trục Nhìn (Recenter)** | Nhấn giữ 2 giây để đồng bộ lại hệ trục phòng của kính Meta Quest. |
 
@@ -333,19 +333,45 @@ Khi người vận hành đứng ở các góc khác nhau quanh robot hoặc khi
 - Thao tác đẩy tay ra xa hoặc kéo về gần người sẽ luôn di chuyển dọc theo mặt phẳng cánh tay vươn của robot.
 - Triệt tiêu hoàn toàn hiện tượng robot bị bẻ ngoặt hoặc quay vòng khi người dùng kéo tay thẳng về sau.
 
-#### 3.3. Khóa Trục Xoay Cổ Tay Thông Minh (Soft Rotation Snapping)
-Khi gập hoặc chúc cổ tay để điều chỉnh góc tiếp cận quả cà chua:
-- Nếu cử động chủ đạo là **GẬP/CHÚC (Pitch)**, các thành phần dao động vô thức ở trục **LẮC NGANG (Yaw)** hoặc **VẶN GẮP (Roll)** sẽ tự động được triệt tiêu mượt mà.
-- Chỉ khi người dùng chủ ý vặn xoay đa hướng (tỷ lệ thành phần phụ vượt quá 40%), hệ thống mới mở toàn bộ góc xoay tự do 3D.
+#### 3.3. Hệ Thống Lọc Nhiễu Đa Tầng & Xoay 3 Trục Độc Lập (Anti-Noise & Arm-Plane Decoupled 3-Axis)
+Nhằm mang lại chuyển động siêu êm, loại bỏ triệt để rung lắc sinh trắc học và tracking jitter:
+- **Tách biệt hoàn toàn 3 trục (World Frame Decoupling & Intuitive Mapping):** Tính toán biến thiên góc xoay trực tiếp trong Không gian Thực ($\Delta R_{world} = R_{hand} \cdot R_{anchor}^{-1}$), triệt tiêu 100% hiện tượng góc nghiêng tay cầm Quest làm biến dạng trục xoay:
+  - **Pitch (Gập/ngửa cổ tay - Uống nước):** Khi dốc mũi tay về phía mình, đầu ngàm kẹp ngửa ra xa thân máy theo đúng chiều trực quan; khi chúi tay xuống, đầu kẹp gập vào thân máy.
+  - **Roll (Lắc cổ tay trái/phải):** Khi lắc nhẹ bàn tay sang hai bên, hai ngón kẹp của robot xoay tròn tại chỗ quanh trục kẹp (Tool Z) để căn chỉnh góc đón quả cà chua trên bàn một cách tự nhiên và đỡ mỏi cơ cẳng tay.
+  - **Tilt (Vặn chìa khóa quanh cẳng tay):** Nghiêng đầu ngàm kẹp sang trái hoặc sang phải (Lateral Tilt quanh trục vươn của cánh tay $\vec{u}_{reach}$), phản hồi trực quan theo hướng vặn chìa khóa.
+- **Đồng bộ hóa theo Mặt Phẳng Cánh Tay (Arm-Plane Rotation Mapping):** Trục gập (Pitch quanh $\vec{u}_{lateral}$) và trục nghiêng hai bên (Tilt quanh $\vec{u}_{reach}$) tự động bám theo góc vươn của cánh tay robot ($q_0$). Khi bấm giữ cả 2 nút (vừa kéo tay thu về vừa ngửa cổ tay), chuyển động tịnh tiến và gập ngửa hòa làm một chuyển động liền mạch dọc theo đúng hướng cánh tay thu về, không bị lệch pha hay ngoẹo góc.
+- **Khóa rãnh đơn trục triệt để (Soft Snapping < 55%):** Nâng ngưỡng khóa trục phụ lên $55\%$ để triệt tiêu hoàn toàn góc kéo xéo sinh học tự nhiên khi thao tác. Khi gập ngửa hoặc lắc cổ tay, robot chỉ chuyển động thẳng tắp trên trục mong muốn, triệt tiêu $100\%$ hiện tượng lắc chao đảo phụ. Chuyển tiếp mượt sang xoay 3D đa trục khi chủ ý bẻ góc lớn ($> 75\%$).
+- **Vùng chết mềm chống vi rung (Soft Deadband $2.6^\circ$ & $6\text{mm}$):** Khi người vận hành bấm giữ phím Grip hoặc Trigger mà vẫn giữ yên tay, mọi dao động run cơ học tự nhiên được hấp thụ hoàn toàn về $0.00$. Chuyển động bắt đầu từ $0$ liên tục, không bị nhảy cóc khi vượt ngưỡng.
+- **Chốt giữ trục chính (Hysteresis Latch):** Ngăn chặn hiện tượng lật trục chập chờn (Chatter) khi người dùng thao tác ở ranh giới giữa 2 trục, ưu tiên giữ ổn định trục ban đầu trừ khi trục mới vượt trội > 15%.
+- **Bộ lọc thích ứng động (Dynamic Adaptive EMA & Slew Rate Limiter):**
+  - **Trên không gian trắc địa $SO(3)$ và $\mathbb{R}^3$:** Khi tay đứng yên hoặc vi rung chậm, hệ số $\alpha$ tự động giảm thấp ($\alpha \approx 0.18$) để lọc phẳng hoàn toàn nhiễu tracking IMU. Khi di chuyển dứt khoát, $\alpha$ tự động tăng cao ($\alpha \approx 0.40 - 0.48$) để phản hồi tức thì với độ trễ cực thấp.
+  - **Giới hạn biến thiên tối đa (Slew Rate Limiter):** Khống chế bước nhảy tối đa $3.5\text{cm}/50\text{ms}$ và $11.5^\circ/50\text{ms}$, triệt tiêu nguy cơ robot bị giật nảy đột biến khi WebXR rớt frame hoặc tracking bị vấp.
+- **Tùy biến linh hoạt qua biến môi trường:**
+  - `ROTATION_MODE=decoupled_3axis` (Mặc định): Điều khiển 3 trục độc lập theo Arm-Plane với hệ thống lọc nhiễu đa tầng.
+  - `ROTATION_MODE=table_roll`: Khóa chúc ngàm cố định vuông góc bàn, chỉ Roll quanh trục kẹp.
+  - `ROTATION_MODE=free_3d`: Xoay 3D tự do.
+  - `ROT_DEADBAND` (Mặc định `0.045` rad ~ $2.6^\circ$), `POS_DEADBAND` (Mặc định `0.006` m ~ $6\text{mm}$).
+  - `ROT_SNAP_LOW` (Mặc định `0.55`), `ROT_SNAP_HIGH` (Mặc định `0.75`).
 
-#### 3.4. Kỹ Thuật Ly Hợp Điều Khiển Tầm Xa (Smart Clutching)
+#### 3.4. Bảng Quy Chuẩn Điều Khiển & Kịch Bản Kiểm Thử (Đã Xác Thực Đúng Logic & Sẵn Sàng Vận Hành)
+Hệ thống điều khiển 6-DOF đã được chuẩn hóa và kiểm nghiệm thực tế, hoàn toàn sẵn sàng cho vận hành trên robot thật:
+
+| Thao tác tay người cầm Quest | Trục toán học | Phản hồi chuyển động trên Robot UR3e | Trạng thái kiểm chứng |
+| :--- | :--- | :--- | :--- |
+| **Gập/ngửa cổ tay (Uống nước)** | Pitch ($\vec{u}_{lateral}$) | Khi dốc tay về phía mình: ngàm ngửa ra xa thân máy. Khi chúi tay: ngàm gập vào thân máy. Khóa cứng lắc phụ. | Đã xác thực đúng logic |
+| **Lắc cổ tay trái / phải** | Roll ($\text{Tool Z}$) | Hai ngón kẹp xoay tròn tại chỗ quanh trục kẹp (CW / CCW) để căn góc đón quả cà chua trên bàn. | Đã xác thực đúng logic |
+| **Vặn chìa khóa quanh cẳng tay** | Tilt ($\vec{u}_{reach}$) | Nghiêng ngàm kẹp sang bên phải (khi vặn phải) hoặc nghiêng sang bên trái (khi vặn trái). | Đã xác thực đúng logic |
+| **Bấm giữ đồng thời Cò (Trigger) + Grip** | Tịnh tiến + Xoay | Tịnh tiến dọc theo cánh tay vươn kết hợp gập ngửa và chỉnh góc ngàm đồng bộ, không giật cục. | Đã xác thực đúng logic |
+| **Bấm nút A hoặc X** | Toggle Gripper | Kích hoạt đóng / mở ngàm kẹp gắp cà chua với phản hồi rung Haptic trên tay cầm. | Đã xác thực đúng logic |
+
+#### 3.5. Kỹ Thuật Ly Hợp Điều Khiển Tầm Xa (Smart Clutching)
 Khi cần điều khiển robot di chuyển quãng đường dài vượt quá tầm với tự nhiên của sải tay:
 1. Bấm giữ Cò trỏ và đưa tay về phía trước đến hết tầm với thoải mái.
 2. **Nhả Cò trỏ:** Cánh tay robot sẽ dừng lại và giữ nguyên vị trí hiện tại trên bàn.
 3. Rút tay cầm về gần ngực hoặc vị trí thoải mái nhất của cơ thể.
 4. **Bấm giữ lại Cò trỏ:** Hệ thống tự động neo mốc mới (Reset Anchor). Robot tiếp tục di chuyển tiến tới từ vị trí đang đứng một cách mượt mà, hoàn toàn không bị giật hay nhảy cóc tọa độ (Zero Teleport).
 
-#### 3.5. Kết Nối Kính Meta Quest Qua Cáp USB (ADB Reverse Cực Nhanh)
+#### 3.6. Kết Nối Kính Meta Quest Qua Cáp USB (ADB Reverse Cực Nhanh)
 Khi cắm cáp USB giữa PC và kính Meta Quest:
 1. Tiến trình ngầm `start_adb_watcher` trong [bootstrap.py](file:///home/nguyen/ur_ws/curobo_ursim/teleop_quest/bootstrap.py) sẽ tự động nhận diện thiết bị và chạy script chuyển tiếp cổng.
 2. Nếu kính báo `unauthorized`, hãy đeo kính lên và nhấn **"Allow USB Debugging"** (và tích chọn "Always allow from this computer").

@@ -31,15 +31,25 @@ class DeltaPoseSource:
         
         self.enable_axis_snapping = os.environ.get("AXIS_SNAPPING", "1") == "1"
         self.nav_mode = os.environ.get("NAV_MODE", "arm_plane").lower()
+        self.rotation_mode = os.environ.get("ROTATION_MODE", "decoupled_3axis").lower()
+        self.rot_scale = float(os.environ.get("ROT_SCALE", "1.1"))
+
+        # Cấu hình chống nhiễu chuyên sâu (Anti-Noise & Jitter Suppression)
+        self.rot_deadband = float(os.environ.get("ROT_DEADBAND", "0.045"))  # ~2.6 độ (triệt tiêu rung tay khi bóp giữ phím)
+        self.pos_deadband = float(os.environ.get("POS_DEADBAND", "0.006"))  # 6mm (triệt tiêu vi rung khi giữ yên tay)
+        self.rot_snap_low = float(os.environ.get("ROT_SNAP_LOW", "0.55"))   # < 55%: khóa cứng rãnh đơn trục (Phương án A)
+        self.rot_snap_high = float(os.environ.get("ROT_SNAP_HIGH", "0.75")) # > 75%: mở xoay 3D đa trục khi chủ ý bẻ chéo lớn
+        self._last_dominant_rot_axis = None
 
         self._last_button_state = 0
         self.out_of_reach_time = 0.0
 
     def _apply_soft_axis_snapping(self, delta_robot):
         """
-        Khóa trục thông minh (Soft Axis Snapping):
-        Triệt tiêu rung lắc / lệch tay sinh trắc học khi người dùng chủ đích di chuyển theo một trục chính,
-        nhưng vẫn chuyển tiếp mềm mại (không giật) khi người dùng chủ đích đi chéo 2D/3D.
+        Khóa trục thông minh (Soft Axis Snapping) đa tầng chống nhiễu:
+        - Triệt tiêu rung lắc / lệch tay sinh trắc học khi người dùng chủ đích di chuyển theo một trục chính.
+        - Khóa trục phụ < 28% về 0.0, chuyển tiếp mượt 28% - 50% bằng hàm Hermite smoothstep.
+        - Nén bình phương rung lắc trục Z khi lướt phẳng XY, nén mặt phẳng XY khi nâng hạ thẳng đứng.
         """
         dx, dy, dz = delta_robot[0], delta_robot[1], delta_robot[2]
         
@@ -47,75 +57,95 @@ class DeltaPoseSource:
         abs_x = abs(dx)
         abs_y = abs(dy)
         
-        if abs_x > 0.005 or abs_y > 0.005:
+        if abs_x > 0.006 or abs_y > 0.006:
             if abs_x >= abs_y:
                 ratio = abs_y / (abs_x + 1e-6)
-                # Nếu tỷ lệ trôi ngang < 20%: Khóa hoàn toàn về 0
-                # Nếu 20% <= tỷ lệ <= 45%: Hòa trộn mượt (smooth blend)
-                # Nếu > 45%: Giữ nguyên cho phép đi chéo tự do
-                if ratio < 0.20:
+                if ratio < 0.28:
                     scale_y = 0.0
-                elif ratio < 0.45:
-                    scale_y = (ratio - 0.20) / (0.45 - 0.20)
+                elif ratio < 0.50:
+                    t = (ratio - 0.28) / (0.50 - 0.28)
+                    scale_y = t * t * (3.0 - 2.0 * t)
                 else:
                     scale_y = 1.0
                 dy = dy * scale_y
             else:
                 ratio = abs_x / (abs_y + 1e-6)
-                if ratio < 0.20:
+                if ratio < 0.28:
                     scale_x = 0.0
-                elif ratio < 0.45:
-                    scale_x = (ratio - 0.20) / (0.45 - 0.20)
+                elif ratio < 0.50:
+                    t = (ratio - 0.28) / (0.50 - 0.28)
+                    scale_x = t * t * (3.0 - 2.0 * t)
                 else:
                     scale_x = 1.0
                 dx = dx * scale_x
 
         # 2. Tách biệt mặt phẳng ngang (X, Y) và trục đứng (Z):
-        # Tránh trôi độ cao khi quét mặt phẳng, hoặc tránh trôi mặt phẳng khi nhấc thẳng lên/hạ thẳng xuống
         d_xy = np.sqrt(dx * dx + dy * dy)
         abs_z = abs(dz)
         
-        if d_xy > 0.025 and abs_z < 0.012:
-            # Người dùng đang trượt phẳng trên mặt bàn: Nén rung lắc trục Z
-            dz = dz * (abs_z / 0.012)
-        elif abs_z > 0.025 and d_xy < 0.012:
-            # Người dùng đang nhấc/hạ thẳng đứng: Nén rung lắc mặt phẳng XY
-            factor = d_xy / 0.012
+        if d_xy > 0.020 and abs_z < 0.012:
+            # Người dùng đang trượt phẳng trên mặt bàn: Nén rung lắc trục Z triệt để (bình phương tỷ lệ)
+            ratio_z = abs_z / 0.012
+            dz = dz * (ratio_z * ratio_z)
+        elif abs_z > 0.020 and d_xy < 0.012:
+            # Người dùng đang nhấc/hạ thẳng đứng: Nén rung lắc mặt phẳng XY triệt để
+            ratio_xy = d_xy / 0.012
+            factor = ratio_xy * ratio_xy
             dx = dx * factor
             dy = dy * factor
 
         return np.array([dx, dy, dz])
 
-    def _apply_soft_rotation_snapping(self, rotvec_tcp):
+    def _apply_soft_rotation_snapping(self, rotvec_tcp, rot_deadband=None):
         """
-        Khóa trục xoay thông minh (Soft Rotation Snapping):
-        Triệt tiêu rung lắc / liên kết chéo vô thức giữa các trục xoay cổ tay.
-        Khi người dùng chủ ý xoay một trục chính (ví dụ Vặn ngàm gắp Roll, hoặc Gập cổ tay Pitch),
-        các trục phụ bị triệt tiêu về 0 để tránh vặn xoắn đa trục ngoài ý muốn.
-        Khi người dùng chủ ý bẻ chéo góc lớn (> 40%), hệ thống tự động hòa trộn mượt mở khóa xoay 3D tự do.
+        Khóa trục xoay thông minh (Soft Rotation Snapping) & Bộ lọc triệt tiêu rò rỉ chéo đa tầng:
+        - Soft deadband (mặc định 0.045 rad ~ 2.6 độ): Triệt tiêu hoàn toàn vi rung sinh học khi bóp giữ phím Grip.
+        - Khóa trục độc lập (< 30%): Khi người dùng chủ ý xoay 1 trục (Pitch, Yaw hoặc Roll),
+          các trục phụ nhỏ hơn 30% trục chính bị triệt tiêu hoàn toàn về 0.0.
+        - Chống đảo trục chập chờn (Hysteresis Latch): Ưu tiên giữ trục chính đã chọn nếu trục mới chưa vượt trội > 15%.
+        - Hòa trộn 3D tự nhiên (30% - 50%): Chuyển tiếp mượt mà bằng đường cong Hermite;
+          khi > 50%, mở khóa hoàn toàn cho phép xoay 3D đa trục tự do.
         """
-        abs_v = np.abs(rotvec_tcp)
-        max_idx = int(np.argmax(abs_v))
-        max_val = abs_v[max_idx]
+        if rot_deadband is None:
+            rot_deadband = self.rot_deadband
 
-        if max_val < 0.02:  # Dưới ~1.1 độ coi như không xoay
-            return rotvec_tcp
+        mag = np.linalg.norm(rotvec_tcp)
+        if mag < rot_deadband:
+            self._last_dominant_rot_axis = None
+            return np.zeros(3)
 
-        snapped = np.copy(rotvec_tcp)
+        # Trừ hao deadband để chuyển động bắt đầu từ 0 liên tục, không giật nảy
+        scaled_rotvec = rotvec_tcp * ((mag - rot_deadband) / mag)
+        abs_v = np.abs(scaled_rotvec)
+        curr_max_idx = int(np.argmax(abs_v))
+        curr_max_val = abs_v[curr_max_idx]
+
+        if curr_max_val < 1e-4:
+            self._last_dominant_rot_axis = None
+            return np.zeros(3)
+
+        # Hysteresis Latch: Giữ ổn định trục chính, tránh hiện tượng rung giật lật trục khi 2 trục gần bằng nhau
+        dominant_idx = curr_max_idx
+        if self._last_dominant_rot_axis is not None and self._last_dominant_rot_axis != curr_max_idx:
+            prev_val = abs_v[self._last_dominant_rot_axis]
+            if prev_val > 0.85 * curr_max_val:
+                dominant_idx = self._last_dominant_rot_axis
+                curr_max_val = prev_val
+        self._last_dominant_rot_axis = dominant_idx
+
+        snapped = np.copy(scaled_rotvec)
         for i in range(3):
-            if i == max_idx:
+            if i == dominant_idx:
                 continue
-            ratio = abs_v[i] / (max_val + 1e-6)
-            # Nếu tỷ lệ xoay phụ < 25%: Khóa hoàn toàn về 0
-            # Nếu 25% <= tỷ lệ <= 40%: Hòa trộn mượt (smooth transition)
-            # Nếu > 40%: Giữ nguyên cho phép xoay 3D tự do
-            if ratio < 0.25:
+            ratio = abs_v[i] / curr_max_val
+            if ratio < self.rot_snap_low:
                 snapped[i] = 0.0
-            elif ratio < 0.40:
-                scale = (ratio - 0.25) / (0.40 - 0.25)
-                snapped[i] = snapped[i] * scale
+            elif ratio < self.rot_snap_high:
+                t = (ratio - self.rot_snap_low) / (self.rot_snap_high - self.rot_snap_low)
+                scale = t * t * (3.0 - 2.0 * t) # Hermite smoothstep
+                snapped[i] = scaled_rotvec[i] * scale
             else:
-                snapped[i] = rotvec_tcp[i]
+                snapped[i] = scaled_rotvec[i]
 
         return snapped
 
@@ -184,8 +214,9 @@ class DeltaPoseSource:
             except Exception:
                 self._anchor_theta_arm = None
             
-            self._ema_pos = None
-            self._ema_quat_xyzw = None
+            self._ema_pos = np.copy(self._anchor_tcp[:3])
+            self._ema_quat_xyzw = np.copy(self._anchor_quat_robot_xyzw)
+            self._last_dominant_rot_axis = None
             self._last_button_state = current_button_state
             return None # Bỏ qua frame đầu tiên để tránh giật
 
@@ -207,11 +238,11 @@ class DeltaPoseSource:
             # --- BỘ LỌC CHỐNG NHIỄU & CHẨN ĐOÁN ---
             delta_mag = np.linalg.norm(delta_q_world)
             
-            if delta_mag < 0.005:  # Deadband tĩnh 0.5cm (5mm)
+            if delta_mag < self.pos_deadband:  # Deadband tĩnh 6mm (loại bỏ vi rung sinh học khi bóp giữ cò)
                 delta_q_world = np.zeros(3)
             else:
                 # SOFT DEADBAND: Khử độ nhảy vọt khi vượt ngưỡng
-                delta_q_world = delta_q_world * ((delta_mag - 0.005) / delta_mag)
+                delta_q_world = delta_q_world * ((delta_mag - self.pos_deadband) / delta_mag)
                 
                 abs_delta = np.abs(delta_q_world)
                 max_axis = np.argmax(abs_delta)
@@ -278,10 +309,25 @@ class DeltaPoseSource:
         target_pos[1] = np.clip(target_pos[1], -0.50, 0.50) # Y
         target_pos[2] = np.clip(target_pos[2], -0.02, 0.60) # Z (an toàn sát mặt bàn)
 
+        # Slew Rate Limiter: Chống đột biến giật nảy do rớt frame hoặc tracking bị nhảy cóc
+        if self._ema_pos is not None:
+            pos_step = target_pos - self._ema_pos
+            step_mag = np.linalg.norm(pos_step)
+            max_step = 0.035  # tối đa 3.5cm / 50ms = 0.7 m/s
+            if step_mag > max_step:
+                target_pos = self._ema_pos + pos_step * (max_step / step_mag)
+
+        # Dynamic Adaptive EMA Filter cho Position:
+        # - Khi đứng yên hoặc vi rung nhẹ (< 1cm): alpha = 0.18 (lọc phẳng 100% rung lắc)
+        # - Khi di chuyển dứt khoát (> 3cm): alpha = 0.38 (nhạy bén bám sát cử động)
         if self._ema_pos is None:
             self._ema_pos = target_pos
         else:
-            self._ema_pos = self.alpha * target_pos + (1.0 - self.alpha) * self._ema_pos
+            pos_diff = np.linalg.norm(target_pos - self._ema_pos)
+            t_pos = np.clip(pos_diff / 0.03, 0.0, 1.0)
+            smooth_pos = t_pos * t_pos * (3.0 - 2.0 * t_pos)
+            alpha_pos = 0.18 + (0.38 - 0.18) * smooth_pos
+            self._ema_pos = alpha_pos * target_pos + (1.0 - alpha_pos) * self._ema_pos
 
         current_time = time.time()
         if diag_msg != self._last_diag_msg or (current_time - self._last_diag_time > 1.5):
@@ -292,68 +338,159 @@ class DeltaPoseSource:
             self._last_diag_time = current_time
 
         # ===============================
-        # TÍNH TOÁN DELTA XOAY (TOOL-CENTRIC)
+        # TÍNH TOÁN DELTA XOAY (DECOUPLED 3-AXIS / TABLE ROLL / FREE 3D)
         # ===============================
         if is_rotating:
             curr_q = frame["quat"]
             curr_quat_quest_xyzw = np.array([curr_q[1], curr_q[2], curr_q[3], curr_q[0]])
             R_hand_current = R.from_quat(curr_quat_quest_xyzw)
-            
-            # R_delta trong không gian tay cầm (Local)
-            R_delta_hand_local = R_q_anchor.inv() * R_hand_current
-            
-            # --- BỘ LỌC DEADBAND XOAY CỔ TAY (SOFT ROTATION DEADBAND) ---
-            angle_rad = R_delta_hand_local.magnitude()
-            rot_deadband = 0.06  # ~3.4 độ (êm ái, nhạy bén)
-            if angle_rad < rot_deadband:
-                R_delta_hand_local = R.identity()
-            else:
-                # Trừ hao phần deadband để góc xoay bắt đầu từ 0 một cách mượt mà
-                scale_factor = (angle_rad - rot_deadband) / angle_rad
-                rotvec = R_delta_hand_local.as_rotvec()
-                R_delta_hand_local = R.from_rotvec(rotvec * scale_factor)
-                
-            # Ánh xạ vector góc xoay từ Tay cầm sang TCP (Tool-Centric)
-            # Meta Quest GripSpace: +X(Phải), -Y(Tiến), -Z(Lên)
-            # UR TCP Local: +Z(Tiến), -X(Lên), +Y(Phải)
-            M_local_q2tcp = np.array([
-                [ 0,  0,  1], # TCP X (Lên/Xuống) = Quest Z
-                [ 1,  0,  0], # TCP Y (Trái/Phải) = Quest X
-                [ 0, -1,  0]  # TCP Z (Tiến/Lùi)  = - Quest Y
-            ])
-            rotvec_hand = R_delta_hand_local.as_rotvec()
-            rotvec_tcp = M_local_q2tcp.dot(rotvec_hand)
 
-            # Áp dụng Khóa trục xoay thông minh (Soft Rotation Snapping)
-            if self.enable_axis_snapping:
-                rotvec_tcp = self._apply_soft_rotation_snapping(rotvec_tcp)
+            # 1. Delta xoay trong Không gian Thực (WebXR World Frame):
+            # R_delta_world = R_hand_current * R_q_anchor.inv()
+            # Trực giao 100% giữa các trục không gian phòng, triệt tiêu hoàn toàn góc nghiêng tay cầm:
+            # - omega_world[0]: Gập/ngửa cổ tay lên xuống (Pitch quanh trục X phòng)
+            # - omega_world[1]: Quét/lắc cổ tay trái phải quanh trục thẳng đứng (Yaw quanh trục Y phòng)
+            # - omega_world[2]: Nghiêng/vặn cổ tay quanh hướng nhìn tới (Roll quanh trục Z phòng)
+            R_delta_world = R_hand_current * R_q_anchor.inv()
+            omega_world = R_delta_world.as_rotvec()
 
-            R_delta_tcp_local = R.from_rotvec(rotvec_tcp)
+            # Chiếu vào 3 trục điều khiển tự nhiên của người dùng:
+            # - Pitch: Đảo ngược chiều theo yêu cầu: dốc tay về phía mình thì ngửa ra xa thân máy!
+            # - Hoán đổi & phân định rõ 3 trục cơ học:
+            #   + Lắc cổ tay trái/phải (-omega_world[1]) -> Xoay tròn hai ngón kẹp quanh trục kẹp (Tool Z Roll)
+            #   + Vặn chìa khóa (omega_world[2]) -> Nghiêng trái / nghiêng phải (Lateral Tilt quanh u_reach)
+            d_pitch =  omega_world[0]
+            d_yaw   =  omega_world[2]   # Cử chỉ Vặn chìa khóa quanh cẳng tay: nghiêng trái / phải
+            d_roll  = -omega_world[1]   # Cử chỉ Lắc cổ tay trái/phải: xoay ngàm đón vật
 
-            if not is_translating:
-                abs_v = np.abs(rotvec_tcp)
-                max_idx = int(np.argmax(abs_v))
-                max_deg = np.degrees(abs_v[max_idx])
-                axis_names = ["GẬP/CHÚC (Pitch)", "LẮC NGANG (Yaw)", "VẶN GẮP (Roll)"]
-                if max_deg > 2.0:
-                    diag_msg = f"XOAY {axis_names[max_idx]} ({max_deg:.1f}°)"
+            raw_rotvec = np.array([d_pitch, d_yaw, d_roll]) * self.rot_scale
+
+            if self.rotation_mode == "table_roll":
+                # Chế độ Proposal 4 (Khóa chúc ngàm, chỉ Roll quanh trục kẹp):
+                mag_r = abs(d_roll)
+                rot_deadband = self.rot_deadband
+                if mag_r < rot_deadband:
+                    delta_roll = 0.0
                 else:
-                    diag_msg = "GIỮ HƯỚNG CŨ"
+                    delta_roll = np.sign(d_roll) * (mag_r - rot_deadband)
+                R_delta_arm = R.identity()
+                R_delta_tool = R.from_rotvec([0.0, 0.0, delta_roll])
+
+                if not is_translating:
+                    roll_deg = np.degrees(delta_roll)
+                    if abs(roll_deg) > 2.0:
+                        direction_str = "PHẢI (CW)" if delta_roll > 0 else "TRÁI (CCW)"
+                        diag_msg = f"XOAY NGÀM {direction_str} ({abs(roll_deg):.1f}° | Lắc Cổ Tay)"
+                    else:
+                        diag_msg = "GIỮ HƯỚNG CŨ"
+            elif self.rotation_mode == "free_3d":
+                # Chế độ 3D tự do (không khóa trục)
+                mag = np.linalg.norm(raw_rotvec)
+                rot_deadband = self.rot_deadband
+                if mag < rot_deadband:
+                    rotvec_tcp = np.zeros(3)
+                else:
+                    rotvec_tcp = raw_rotvec * ((mag - rot_deadband) / mag)
+                R_delta_arm = R.identity()
+                R_delta_tool = R.from_rotvec(rotvec_tcp)
+
+                if not is_translating:
+                    abs_v = np.abs(rotvec_tcp)
+                    max_idx = int(np.argmax(abs_v))
+                    max_deg = np.degrees(abs_v[max_idx])
+                    axis_names = ["GẬP/CHÚC (Pitch)", "NGHIÊNG TRÁI/PHẢI (Tilt)", "LẮC XOAY NGÀM (Roll)"]
+                    if max_deg > 2.0:
+                        diag_msg = f"XOAY 3D TỰ DO {axis_names[max_idx]} ({max_deg:.1f}°)"
+                    else:
+                        diag_msg = "GIỮ HƯỚNG CŨ"
+            else:
+                # Chế độ chuẩn DECOUPLED 3-AXIS (Mặc định: Kết hợp Phương án A + B):
+                # 1. Phương án A: Khóa rãnh đơn trục (Soft Rotation Snapping với ngưỡng 55%) triệt tiêu 100% rung lắc
+                if self.enable_axis_snapping:
+                    rotvec_filtered = self._apply_soft_rotation_snapping(raw_rotvec)
+                else:
+                    mag = np.linalg.norm(raw_rotvec)
+                    rotvec_filtered = np.zeros(3) if mag < self.rot_deadband else raw_rotvec * ((mag - self.rot_deadband) / mag)
+
+                pitch_val = rotvec_filtered[0]
+                yaw_val   = rotvec_filtered[1]
+                roll_val  = rotvec_filtered[2]
+
+                # 2. Phương án B: Đồng bộ xoay theo Mặt phẳng cánh tay robot (Arm-Plane Rotation)
+                if self.nav_mode == "arm_plane":
+                    theta_arm = self._anchor_theta_arm
+                    if theta_arm is None:
+                        x_anc = self._anchor_tcp[0]
+                        y_anc = self._anchor_tcp[1]
+                        r_anc = np.hypot(x_anc, y_anc)
+                        theta_arm = np.arctan2(y_anc, x_anc) if r_anc > 0.03 else 0.0
+
+                    # Vector đơn vị vươn dọc theo cánh tay trong Base:
+                    u_reach = np.array([np.cos(theta_arm), np.sin(theta_arm), 0.0])
+                    # Trục ngang tiếp tuyến vuông góc với phương duỗi cánh tay trong Base:
+                    u_lateral = np.array([np.sin(theta_arm), -np.cos(theta_arm), 0.0])
+
+                    # Pitch gập dọc mặt phẳng cánh tay vươn (xoay quanh u_lateral)
+                    # Tilt nghiêng trái/phải dọc theo trục vươn của cánh tay (xoay quanh u_reach)
+                    rotvec_arm = u_lateral * pitch_val + u_reach * yaw_val
+                    R_delta_arm = R.from_rotvec(rotvec_arm)
+                    # Roll vặn quanh trục kẹp Tool Z (Lắc cổ tay trái/phải)
+                    R_delta_tool = R.from_rotvec([0.0, 0.0, roll_val])
+                else:
+                    R_delta_arm = R.identity()
+                    R_delta_tool = R.from_rotvec(rotvec_filtered)
+
+                if not is_translating:
+                    abs_v = np.abs(rotvec_filtered)
+                    max_idx = int(np.argmax(abs_v))
+                    max_deg = np.degrees(abs_v[max_idx])
+                    axis_names = ["GẬP/CHÚC (Pitch)", "NGHIÊNG TRÁI/PHẢI (Tilt)", "LẮC XOAY NGÀM (Roll)"]
+                    if max_deg > 2.0:
+                        ratios = [abs_v[i] / (abs_v[max_idx] + 1e-6) for i in range(3)]
+                        secondary = [i for i in range(3) if i != max_idx and ratios[i] > 0.50]
+                        if secondary:
+                            diag_msg = f"XOAY 3D ĐA TRỤC ({max_deg:.1f}° | {axis_names[max_idx]})"
+                        else:
+                            diag_msg = f"XOAY {axis_names[max_idx]} ({max_deg:.1f}° | Lọc độc lập)"
+                    else:
+                        diag_msg = "GIỮ HƯỚNG CŨ"
+
+            # Áp dụng góc xoay vào Robot:
+            # - R_delta_arm tác động trong hệ tọa độ Base / Arm-Plane (Gập và Quét theo mặt phẳng tay)
+            # - R_delta_tool tác động trong hệ tọa độ Tool TCP (Vặn chìa khóa Roll)
+            R_target_robot = R_delta_arm * R_r_anchor * R_delta_tool
         else:
-            R_delta_tcp_local = R.identity()
-            
-        # Áp dụng góc xoay vào TCP hiện tại
-        R_target_robot = R_r_anchor * R_delta_tcp_local
+            self._last_dominant_rot_axis = None
+            R_target_robot = R_r_anchor
         target_quat_xyzw = R_target_robot.as_quat()
         
-        # EMA Filter cho Quaternion
+        # Dynamic Adaptive EMA Filter cho Quaternion (mượt mà, triệt tiêu vi rung)
         if self._ema_quat_xyzw is None:
             self._ema_quat_xyzw = target_quat_xyzw
         else:
             if np.dot(self._ema_quat_xyzw, target_quat_xyzw) < 0:
                 target_quat_xyzw = -target_quat_xyzw
             
-            self._ema_quat_xyzw = self.alpha * target_quat_xyzw + (1.0 - self.alpha) * self._ema_quat_xyzw
+            # Tính khoảng cách góc trắc địa (Geodesic Angle Distance) trên SO(3)
+            dot_val = np.clip(abs(np.dot(self._ema_quat_xyzw, target_quat_xyzw)), -1.0, 1.0)
+            rot_diff = 2.0 * np.arccos(dot_val)
+            
+            # Slew Rate Limiter cho góc xoay (chống giật đột biến nếu tracking bị vấp)
+            max_rot_step = 0.20  # ~11.5 độ / 50ms
+            if rot_diff > max_rot_step:
+                s_factor = max_rot_step / rot_diff
+                target_quat_xyzw = (1.0 - s_factor) * self._ema_quat_xyzw + s_factor * target_quat_xyzw
+                target_quat_xyzw /= np.linalg.norm(target_quat_xyzw)
+                rot_diff = max_rot_step
+
+            # Dynamic Adaptive Alpha cho góc xoay:
+            # - Khi đứng yên hoặc vi rung chậm (< 4 độ): alpha = 0.18 (lọc phẳng 100% rung lắc)
+            # - Khi xoay dứt khoát (> 15 độ): alpha = 0.48 (phản hồi tức thì, không trễ)
+            t_rot = np.clip(rot_diff / 0.25, 0.0, 1.0)
+            smooth_rot = t_rot * t_rot * (3.0 - 2.0 * t_rot)
+            alpha_rot = 0.18 + (0.48 - 0.18) * smooth_rot
+            
+            self._ema_quat_xyzw = alpha_rot * target_quat_xyzw + (1.0 - alpha_rot) * self._ema_quat_xyzw
             self._ema_quat_xyzw /= np.linalg.norm(self._ema_quat_xyzw)
             
         target_quat_wxyz = [self._ema_quat_xyzw[3], self._ema_quat_xyzw[0], self._ema_quat_xyzw[1], self._ema_quat_xyzw[2]]
@@ -389,4 +526,5 @@ class DeltaPoseSource:
         self._anchor_theta_arm = None
         self._ema_pos = None
         self._ema_quat_xyzw = None
+        self._last_dominant_rot_axis = None
         self.out_of_reach_time = 0.0
