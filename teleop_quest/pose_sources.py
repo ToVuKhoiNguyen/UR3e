@@ -1,4 +1,5 @@
 import numpy as np
+import transforms3d
 
 class WidgetPoseSource:
     """Nguồn cấp tọa độ cho Controller (Đọc từ Widget)"""
@@ -37,7 +38,6 @@ def get_robot_fk_as_ur(teleop, ctrl):
     Dùng vị trí khớp thật (q_real) để tính FK bằng bộ não CuRobo.
     Giúp loại bỏ sai lệch Calibration giữa URSim thật và CuRobo URDF.
     """
-    import transforms3d
     q_real = ctrl.joints()
     fk_dict = teleop._curobo.fk(q_real)
     pos = fk_dict["pos"]

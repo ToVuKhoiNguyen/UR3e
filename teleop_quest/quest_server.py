@@ -101,6 +101,28 @@ class QuestServer:
                 except Exception:
                     pass
 
+    def broadcast_robot_telemetry(self, pos, quat, status: str = "OK", gripper: bool = False, joints: list = None):
+        """Phát tọa độ TCP thực tế, quaternion và trạng thái robot tới WebXR Cockpit HUD."""
+        with self._lock:
+            clients = list(self._clients)
+            loop = self._loop
+        if clients and loop:
+            msg_dict = {
+                "type": "robot_telemetry",
+                "pos": [round(float(p), 4) for p in pos] if pos is not None else [0.0, 0.0, 0.0],
+                "quat": [round(float(q), 4) for q in quat] if quat is not None else [1.0, 0.0, 0.0, 0.0],
+                "status": str(status),
+                "gripper": bool(gripper)
+            }
+            if joints is not None:
+                msg_dict["joints"] = [round(float(j), 3) for j in joints]
+            msg = json.dumps(msg_dict)
+            for ws in clients:
+                try:
+                    asyncio.run_coroutine_threadsafe(ws.send(msg), loop)
+                except Exception:
+                    pass
+
     def send_camera_frame(self, frame_rgb, quality: int = 75):
         """Mã hóa frame ảnh RGB thành JPEG, lưu cache đĩa và gửi tới client qua WebSocket & MJPEG Stream."""
         try:

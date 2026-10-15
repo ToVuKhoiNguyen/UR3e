@@ -38,6 +38,6 @@ class TimeoutWatchdog(threading.Thread):
                     try:
                         self.executor._ctrl.servoStop()
                         print("[Watchdog] MAT KET NOI VR! DA PHANH KHAN CAP ROBOT.")
-                    except:
+                    except Exception:
                         pass
                 self.disarm()

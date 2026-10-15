@@ -1,4 +1,3 @@
-import math
 import numpy as np
 import torch
 from safety.singularity_guard.jacobian_metrics import JacobianMetrics

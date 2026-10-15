@@ -79,6 +79,31 @@
                     } else if (data.type === 'camera' && data.image) {
                         lastCamUpdate = Date.now();
                         updateCamDisplay('data:image/jpeg;base64,' + data.image);
+                    } else if (data.type === 'robot_telemetry') {
+                        if (data.pos && data.pos.length >= 3) {
+                            if (elValX) elValX.innerText = data.pos[0].toFixed(3);
+                            if (elValY) elValY.innerText = data.pos[1].toFixed(3);
+                            if (elValZ) elValZ.innerText = data.pos[2].toFixed(3);
+                        }
+                        if (data.quat && data.quat.length >= 4) {
+                            // Backend gửi [qw, qx, qy, qz]
+                            if (elValQw) elValQw.innerText = data.quat[0].toFixed(3);
+                            if (elValQx) elValQx.innerText = data.quat[1].toFixed(3);
+                            if (elValQy) elValQy.innerText = data.quat[2].toFixed(3);
+                            if (elValQz) elValQz.innerText = data.quat[3].toFixed(3);
+                        }
+                        const elRobotStatus = document.getElementById('robot-status-badge');
+                        if (elRobotStatus && data.status) {
+                            elRobotStatus.innerText = data.status;
+                            let st = data.status.toLowerCase();
+                            if (st.includes('tracking') || st.includes('home') || st.includes('bật') || st.includes('sẵn sàng') || st.includes('standby')) {
+                                elRobotStatus.className = 'badge green';
+                            } else if (st.includes('lỗi') || st.includes('error') || st.includes('stop') || st.includes('kẹt')) {
+                                elRobotStatus.className = 'badge red';
+                            } else {
+                                elRobotStatus.className = 'badge orange';
+                            }
+                        }
                     }
                 } catch (e) { console.error("WS error", e); }
             };
@@ -123,7 +148,7 @@
         });
 
         // Quản lý chuyển đổi giữa Edit Mode (chỉnh UI) và Drive Mode (lái Robot)
-        let uiLocked = false;
+        let uiLocked = true;
         const btnToggleUI = document.getElementById('btn-toggle-ui');
         const cockpitPanel = document.getElementById('cockpit-panel');
 
@@ -133,9 +158,7 @@
 
             if (uiLocked) {
                 if (cockpitPanel) cockpitPanel.classList.add('drive-mode');
-                if (overlay) overlay.style.pointerEvents = 'none';
-                btnToggleUI.style.pointerEvents = 'auto';
-                btnExitVR.style.pointerEvents = 'auto';
+                if (overlay) overlay.classList.add('drive-mode');
                 btnToggleUI.innerHTML = '<span></span> Unlock UI (Edit Mode) [B/Y]';
                 btnToggleUI.style.background = '#10b981';
                 if (elValMode) {
@@ -144,9 +167,7 @@
                 }
             } else {
                 if (cockpitPanel) cockpitPanel.classList.remove('drive-mode');
-                if (overlay) overlay.style.pointerEvents = 'auto';
-                btnToggleUI.style.pointerEvents = 'auto';
-                btnExitVR.style.pointerEvents = 'auto';
+                if (overlay) overlay.classList.remove('drive-mode');
                 btnToggleUI.innerHTML = '<span></span> Lock UI (Drive Mode) [B/Y]';
                 btnToggleUI.style.background = '#f59e0b';
                 if (elValMode) {
@@ -201,7 +222,7 @@
                 elHome.innerText = "Returning Home...";
                 elHome.className = "badge green";
                 setTimeout(() => {
-                    elHome.innerText = "Thumbstick / Hold B";
+                    elHome.innerText = "Thumbstick / Hold B (>3s)";
                     elHome.className = "badge gray";
                 }, 4000);
             }
@@ -238,7 +259,7 @@
             btnEnterVR.style.display = 'none';
             document.getElementById('launcher-screen').style.display = 'none';
             vrOverlay.style.display = 'flex'; // Hiện Overlay bằng flex để căn giữa
-            setDriveMode(uiLocked, false);
+            setDriveMode(true, true); // Luôn mặc định mở Drive Mode ngay khi vào VR để lái robot tức thì
             statusDiv.innerText = "In VR Session";
 
             session.addEventListener('end', onSessionEnded);
@@ -331,13 +352,13 @@
                     lastThumbstickPressed = thumbstickPressed;
 
                     // 2. Xử lý nút B / Y:
-                    // - Bấm nhả nhanh (< 1 giây): Bật / Tắt Drive Mode
-                    // - Nhấn giữ lâu (> 1 giây): Kích hoạt Go Home
+                    // - Bấm nhả nhanh (< 3 giây): Bật / Tắt Drive Mode
+                    // - Nhấn giữ lâu (> 3 giây): Kích hoạt Go Home
                     if (driveTogglePressed) {
                         if (btnBPressStartTime === 0) {
                             btnBPressStartTime = Date.now();
                             btnBLongTriggered = false;
-                        } else if (Date.now() - btnBPressStartTime > 1000 && !btnBLongTriggered) {
+                        } else if (Date.now() - btnBPressStartTime > 3000 && !btnBLongTriggered) {
                             btnBLongTriggered = true;
                             triggerGoHome(activeSource);
                         }
@@ -393,15 +414,7 @@
                         elValGripperBtn.className = gripperBtnPressed ? "badge red" : "badge gray";
                     }
                     
-                    elValX.innerText = pos.x.toFixed(4);
-                    elValY.innerText = pos.y.toFixed(4);
-                    elValZ.innerText = pos.z.toFixed(4);
-                    
-                    elValQx.innerText = quat.x.toFixed(4);
-                    elValQy.innerText = quat.y.toFixed(4);
-                    elValQz.innerText = quat.z.toFixed(4);
-                    elValQw.innerText = quat.w.toFixed(4);
-                    
+                    // elValX, Y, Z, Qx, Qy, Qz, Qw được cập nhật tự động từ luồng telemetry của Robot thực tế (20Hz)
                     sentData = true;
                 }
             }

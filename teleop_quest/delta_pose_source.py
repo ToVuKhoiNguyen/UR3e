@@ -1,12 +1,15 @@
+import os
+import time
 import numpy as np
+import transforms3d
+from scipy.spatial.transform import Rotation as R
 
 class DeltaPoseSource:
     """
     Implements PoseSource contract.
     Chuyển delta tọa độ từ kính Quest sang base_link của UR3e.
     """
-    def __init__(self, server, ctrl, scale: float = 0.6, max_delta_m: float = 0.18, anchor_reference_func=None, alpha: float = 0.25):
-        import os
+    def __init__(self, server, ctrl, scale: float = 0.75, max_delta_m: float = 0.22, anchor_reference_func=None, alpha: float = 0.28):
         self.server = server
         self.ctrl = ctrl
         self.scale = float(os.environ.get("TELEOP_SCALE", str(scale)))
@@ -17,17 +20,6 @@ class DeltaPoseSource:
         self._last_diag_msg = ""
         self._last_diag_time = 0
 
-        # Ma trận xoay từ Quest local space sang UR3e base_link
-        # Giả định sếp đứng đối diện mặt trước của robot:
-        # Quest X (sang phải) -> UR3e -Y (trái của robot)
-        # Quest Y (lên trên) -> UR3e +Z (lên trên)
-        # Quest Z (lùi lại) -> UR3e -X (về phía sau robot)
-        self.R_q2r = np.array([
-            [ 0,  0, -1],  
-            [-1,  0,  0],  
-            [ 0,  1,  0],  
-        ])
-
         self._anchor_pos_quest = None
         self._anchor_quat_quest_xyzw = None
         self._anchor_tcp = None
@@ -36,7 +28,6 @@ class DeltaPoseSource:
         self._ema_pos = None
         self._ema_quat_xyzw = None
         
-        import os
         self.enable_axis_snapping = os.environ.get("AXIS_SNAPPING", "1") == "1"
         self.nav_mode = os.environ.get("NAV_MODE", "arm_plane").lower()
 
@@ -140,7 +131,6 @@ class DeltaPoseSource:
                 return None
             
             # Tính toán quaternion neo của robot
-            import transforms3d
             axang = self._anchor_tcp[3:]
             angle = np.linalg.norm(axang)
             if angle > 1e-6:
@@ -161,7 +151,6 @@ class DeltaPoseSource:
         diag_msg = "STANDING STILL"
         delta_mag = 0.0
         
-        from scipy.spatial.transform import Rotation as R
         R_q_anchor = R.from_quat(self._anchor_quat_quest_xyzw)
         R_r_anchor = R.from_quat(self._anchor_quat_robot_xyzw)
         
@@ -248,7 +237,6 @@ class DeltaPoseSource:
         else:
             self._ema_pos = self.alpha * target_pos + (1.0 - self.alpha) * self._ema_pos
 
-        import time
         current_time = time.time()
         if diag_msg != self._last_diag_msg or (current_time - self._last_diag_time > 1.5):
             if diag_msg != "STANDING STILL":
@@ -318,7 +306,6 @@ class DeltaPoseSource:
         """Dùng cho lúc init hệ thống"""
         try:
             tcp = self.ctrl.tcp()
-            import transforms3d
             angle = np.linalg.norm(tcp[3:])
             if angle > 1e-6:
                 axis = np.array(tcp[3:]) / angle

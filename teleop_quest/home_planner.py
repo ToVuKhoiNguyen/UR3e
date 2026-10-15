@@ -1,5 +1,4 @@
 import os
-import math
 import time
 import socket
 import threading
@@ -7,6 +6,7 @@ import torch
 import numpy as np
 from curobo.types import JointState
 from curobo.motion_planner import MotionPlannerCfg, MotionPlanner
+from core.curobo_ursim_control import send_urscript
 
 
 def unlock_robot_dashboard(robot_ip: str = "127.0.0.1"):
@@ -74,7 +74,8 @@ class HomePlanner:
         ui_status,
         cb_teleop,
         is_navigating_home: threading.Event = None,
-        poll_sleep: float = 0.05
+        poll_sleep: float = 0.05,
+        quest_server = None
     ) -> bool:
         """Thực hiện quy hoạch và chạy về vị trí Home an toàn với cơ chế bảo vệ kép"""
         if is_navigating_home is not None:
@@ -120,7 +121,6 @@ class HomePlanner:
                     print(f"[HomePlanner] Lỗi quy hoạch CuRobo: {e}")
 
             # 4. Tạo tập điểm quỹ đạo tối ưu (nếu CuRobo không tìm được do kẹt, chạy thẳng về target_home)
-            from core.curobo_ursim_control import send_urscript
             ui_status.value = "Đang chạy về Home an toàn..."
 
             if traj is not None and len(traj) > 1:
@@ -155,6 +155,18 @@ class HomePlanner:
                         joint_names=self.mp.joint_names
                     )
                     self.viz.set_joint_state(js)
+                if quest_server is not None:
+                    try:
+                        fk_h = teleop._curobo.fk(q_now)
+                        quest_server.broadcast_robot_telemetry(
+                            pos=fk_h["pos"],
+                            quat=fk_h["quat"],
+                            status="Returning Home",
+                            gripper=False,
+                            joints=q_now
+                        )
+                    except Exception:
+                        pass
                 dist_to_home = sum(abs(q_now[i] - target_home[i]) for i in range(6))
                 if dist_to_home < 0.03:
                     break

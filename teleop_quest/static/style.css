@@ -78,19 +78,22 @@ button {
     transition: opacity 0.2s ease;
 }
 
-/* Drive Mode: Màn hình xuyên thấu để tia laser tay cầm tự do lái robot */
-#cockpit-panel.drive-mode {
-    pointer-events: none;
-    opacity: 0.92;
+/* Drive Mode: Màn hình xuyên thấu - Tắt toàn bộ tia laser chuột DOM Overlay để tay cầm tự do lái robot 6DoF */
+#vr-overlay.drive-mode,
+#vr-overlay.drive-mode *,
+#cockpit-panel.drive-mode,
+#cockpit-panel.drive-mode * {
+    pointer-events: none !important;
 }
 
-#cockpit-panel.drive-mode .cockpit-header {
-    pointer-events: none;
-}
-
+/* Cho phép các nút chức năng trên thanh tiêu đề đón nhận click nếu người dùng trỏ thẳng vào */
+#vr-overlay.drive-mode #btn-toggle-ui,
+#vr-overlay.drive-mode #btn-home-vr,
+#vr-overlay.drive-mode #btn-exit-vr,
 #cockpit-panel.drive-mode #btn-toggle-ui,
+#cockpit-panel.drive-mode #btn-home-vr,
 #cockpit-panel.drive-mode #btn-exit-vr {
-    pointer-events: auto; /* Cho phép bấm lại nút để chuyển chế độ hoặc thoát VR */
+    pointer-events: auto !important;
 }
 
 /* Header */

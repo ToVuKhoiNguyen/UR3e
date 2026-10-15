@@ -17,6 +17,7 @@ import yaml
 import traceback
 import threading
 import numpy as np
+import torch
 
 from core.curobo_ursim_control import CuRoboURSim
 from core.data_logger import DataLogger
@@ -168,10 +169,10 @@ def main():
     )
 
     pose_source = DeltaPoseSource(
-        quest_server, ctrl, scale=0.6,
+        quest_server, ctrl, scale=0.75,
         anchor_reference_func=lambda: get_robot_fk_as_ur(teleop, ctrl),
-        alpha=0.25,
-        max_delta_m=0.18
+        alpha=0.28,
+        max_delta_m=0.22
     )
 
     # 5. Khởi tạo bộ giám sát mất kết nối & Home Planner
@@ -223,6 +224,9 @@ def main():
         if is_navigating_home.is_set():
             print("[HomePlanner] Đang di chuyển về Home, vui lòng đợi...")
             return
+        is_navigating_home.set()
+        teleop.enabled = False
+        ui.cb_teleop.value = False
         threading.Thread(
             target=home_planner.go_home,
             args=(
@@ -231,7 +235,8 @@ def main():
             ),
             kwargs={
                 "is_navigating_home": is_navigating_home,
-                "poll_sleep": POLL_SLEEP
+                "poll_sleep": POLL_SLEEP,
+                "quest_server": quest_server
             },
             daemon=True
         ).start()
@@ -294,6 +299,9 @@ def main():
             if not is_navigating_home.is_set():
                 print("[Quest] Nhận lệnh Go Home từ tay cầm VR! Bắt đầu đưa robot về Home an toàn...")
                 ui.set_status("Returning Home (Từ VR)...")
+                is_navigating_home.set()
+                teleop.enabled = False
+                ui.cb_teleop.value = False
                 quest_server.send_haptic(1.0, 300)
                 threading.Thread(
                     target=home_planner.go_home,
@@ -303,10 +311,12 @@ def main():
                     ),
                     kwargs={
                         "is_navigating_home": is_navigating_home,
-                        "poll_sleep": POLL_SLEEP
+                        "poll_sleep": POLL_SLEEP,
+                        "quest_server": quest_server
                     },
                     daemon=True
                 ).start()
+                continue
 
         # B. Cập nhật trạng thái kết nối
         ui.set_connected(quest_server.is_connected())
@@ -450,7 +460,7 @@ def main():
                 traceback.print_exc()
         elif not teleop.enabled:
             curr_st = str(ui.ui_status.value)
-            if not curr_st.startswith("Lỗi") and not curr_st.startswith("EMERGENCY") and not "Error" in curr_st:
+            if not curr_st.startswith("Lỗi") and not curr_st.startswith("EMERGENCY") and "Error" not in curr_st:
                 ui.set_status("Tắt")
 
         # E. Cập nhật giao diện 3D và chia sẻ trạng thái cho luồng Camera nền
@@ -458,8 +468,18 @@ def main():
             # Đồng bộ dáng robot thực tế lên Viser 3D (nhẹ, chỉ gửi 1 gói websocket cập nhật góc khớp)
             ui.update_robot_state(q_real)
 
-            # Cập nhật trạng thái mới nhất cho luồng camera_worker chạy ngầm độc lập
             current_grip = is_grip_pressed if teleop.enabled else bool(ui.cb_gripper.value)
+
+            # Phát telemetry thời gian thực tới WebXR Cockpit HUD (20Hz)
+            quest_server.broadcast_robot_telemetry(
+                pos=fk_res["pos"],
+                quat=fk_res["quat"],
+                status=str(ui.ui_status.value),
+                gripper=current_grip,
+                joints=q_real
+            )
+
+            # Cập nhật trạng thái mới nhất cho luồng camera_worker chạy ngầm độc lập
             with camera_lock:
                 camera_state["tool_pos"] = fk_res["pos"]
                 camera_state["tool_quat"] = fk_res["quat"]

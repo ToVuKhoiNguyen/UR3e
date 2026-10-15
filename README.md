@@ -70,7 +70,7 @@ Hệ thống điều khiển viễn thao thời gian thực (Real-time Teleopera
 12. **Các Lớp Bảo Vệ An Toàn (Safety Gate & Singularity Guard):**
     - **Giám sát điểm kỳ dị (Singularity Guard):** Đánh giá ma trận Jacobian thời gian thực, tự động chặn lệnh nếu giá trị suy biến nhỏ nhất $\sigma_{min} < 0.035$.
     - **Chống chúi cắm bắp tay:** Giới hạn góc nâng vai `shoulder_lift_joint` $\le +0.05$ rad để ngăn ngừa rủi ro đâm bắp tay xuống mặt bàn.
-    - **Giới hạn tốc độ và gia tốc (Scaled Vector Rate Limiter):** Kẹp vận tốc góc khớp tối đa $\le 0.5$ rad/s ($\approx 28.6^\circ$/s, tối đa 0.025 rad mỗi bước 50ms) để tái hiện chuyển động êm ái, đầm chắc chuẩn manual jog của Teach Pendant.
+    - **Giới hạn tốc độ và gia tốc (Scaled Vector Rate Limiter):** Kẹp vận tốc góc khớp tối đa $\le 0.3$ rad/s ($\approx 17.2^\circ$/s, tối đa 0.015 rad mỗi bước 50ms) để tái hiện chuyển động êm ái, an toàn chuẩn manual jog của Teach Pendant.
     - **Phát hiện lật nhánh IK:** Chặn các bước nhảy góc khớp đột ngột (`max_jump > 1.5` rad).
     - **Giám sát mất kết nối (Timeout Watchdog):** Tự động dừng khẩn cấp robot qua `servoStop` nếu mất tín hiệu VR quá thời gian timeout.
 
@@ -120,16 +120,17 @@ Toàn bộ hệ thống điều khiển viễn thao vận hành theo luồng kh�
 
 Hệ thống thiết lập 2 chế độ vận hành độc lập, hỗ trợ đồng bộ hai chiều tức thì giữa kính thực tế ảo và màn hình máy tính:
 
-1. **Chế độ Chỉnh sửa (Edit Mode):**
-   - **Mục đích:** Thao tác cài đặt thông số, quan sát góc nhìn 3D và chuẩn bị nhiệm vụ.
-   - **Tương tác:** Màn hình giao diện HUD nổi lơ lửng trong không gian AR nhận tia laser từ tay cầm (`pointer-events: auto`), cho phép người dùng click chuột ảo vào các nút bấm, chọn tùy chọn và tương tác với khung Viser 3D.
-   - **An toàn:** Cánh tay robot được khóa trạng thái (`teleop.enabled = False`). Mọi thao tác bóp cò hoặc vung tay trong chế độ này đều không phát lệnh di chuyển robot.
+1. **Chế độ Cầm lái (Drive Mode - Mặc định khi vào VR):**
+   - **Mục đích:** Vừa quan sát toàn bộ giao diện Cockpit HUD (mô hình 3D, camera cổ tay, tọa độ thời gian thực) nổi trước mắt, vừa tự do điều khiển cánh tay robot bằng tay cầm mà không bị vướng chuột ảo.
+   - **Tương tác:** Giao diện HUD tự động kích hoạt chế độ xuyên thấu triệt để (`pointer-events: none !important`). Hệ điều hành Meta Horizon OS sẽ tắt hoàn toàn tia laser 2D. Lúc này mọi thao tác bóp cò Trigger, bóp Grip và bấm nút A/X được chuyển 100% sang điều khiển robot 6DoF, không còn hiện tượng "di chuột trên màn hình".
+   - **Phản hồi thời gian thực:** Thẻ `ROBOT POSE` cập nhật liên tục tọa độ Position (X, Y, Z tính bằng mét) và Orientation (Qx, Qy, Qz, Qw) từ vòng lặp RTDE 20Hz của cánh tay robot UR3e thực tế. Thẻ `VR CONTROLLER` hiển thị trạng thái các nút bấm.
+   - **Cách kích hoạt:** Mặc định tự động bật khi người dùng bấm *START IMMERSIVE VR*, hoặc bấm phím cứng **B** (tay phải) / **Y** (tay trái) trên tay cầm, hoặc click nút *Lock UI* trên menu HUD.
 
-2. **Chế độ Cầm lái (Drive Mode):**
-   - **Cách kích hoạt:** Bấm phím cứng **B** (tay phải) hoặc **Y** (tay trái) trên tay cầm Quest, hoặc bấm nút *Lock UI* trên thanh menu HUD, hoặc tích chọn checkbox *Bật Điều Khiển (Teleop)* trên màn hình máy tính.
-   - **Phản hồi:** Tay cầm Quest phát xung rung xúc giác (Haptic pulse 120ms) xác nhận chuyển chế độ, thẻ trạng thái chuyển sang màu xanh lá (`Drive Mode`) và Viser hiển thị `Tracking`.
-   - **Tương tác:** Giao diện HUD tự động chuyển sang chế độ xuyên thấu (`pointer-events: none`). Tia laser từ tay cầm đi xuyên qua bảng điều khiển, loại bỏ hoàn toàn rủi ro bấm nhầm nút trên web khi đang lái.
-   - **Vận hành:** Cánh tay robot lập tức bám theo chuyển động tay người hoặc chuột máy tính với độ trễ thấp. Bấm lại phím **B/Y** hoặc bỏ chọn checkbox bất kỳ lúc nào để ngắt kết nối an toàn và quay về Edit Mode.
+2. **Chế độ Chỉnh sửa Giao diện (Edit Mode):**
+   - **Mục đích:** Thao tác cài đặt thông số, dùng tia laser chuột để xoay camera xem mô hình 3D trong khung Viser hoặc click các nút bấm trên trang web.
+   - **Cách chuyển sang Edit Mode:** Khi đang ở trong VR, chỉ cần **bấm nhả phím B (hoặc Y)** trên tay cầm. Nút menu góc trên bên trái chuyển sang màu cam (`Lock UI (Drive Mode)`), thẻ Mode chuyển sang màu cam (`Edit Mode`), và tia laser chuột 2D xuất hiện.
+   - **An toàn:** Cánh tay robot được khóa trạng thái (`teleop.enabled = False`). Mọi thao tác bóp cò hoặc vung tay trong chế độ này đều không phát lệnh di chuyển robot, tránh va chạm ngoài ý muốn.
+   - **Quay lại lái robot:** Sau khi thao tác giao diện xong, chỉ cần **bấm nhả lại phím B (hoặc Y)**. Tia laser lập tức biến mất và hệ thống quay lại Drive Mode để tiếp tục lái robot mượt mà mà không cần thoát khỏi VR.
 
 ### 2.3. Quy Trình Vòng Lặp Điều Khiển Thời Gian Thực (Chu Kỳ 20Hz - 50ms)
 
@@ -147,7 +148,7 @@ Trong mỗi chu kỳ 50ms của `teleop_quest/main_quest.py`, hệ thống thự
 3. **Bước 3: Kiểm định an toàn và điểm kỳ dị (`SafetyGate` & `SingularityGuard`):**
    - Đánh giá ma trận Jacobian của cấu hình góc khớp mục tiêu, đo lường giá trị suy biến nhỏ nhất $\sigma_{min}$.
    - Nếu $\sigma_{min} < 0.035$ (tư thế tiến sát điểm kỳ dị), cổng an toàn lập tức chặn lệnh, phát xung rung cảnh báo về tay cầm VR và giữ robot đứng yên.
-   - Khối Rate Limiter kiểm tra và kẹp biến thiên vận tốc khớp tối đa $\le 0.5$ rad/s để tạo chuyển động êm dịu, không giật cục.
+   - Khối Rate Limiter kiểm tra và kẹp biến thiên vận tốc khớp tối đa $\le 0.3$ rad/s để tạo chuyển động êm dịu, không giật cục.
 
 4. **Bước 4: Thực thi lệnh chuyển động thời gian thực (`ServoJExecutor`):**
    - Đảm bảo giải phóng thanh ghi RTDE thông qua lệnh Dashboard `stop\n`.
@@ -305,52 +306,117 @@ Hệ thống sẽ hiển thị các cổng truy cập:
 
 ### Bước 4: Hướng Dẫn Chi Tiết Điều Khiển Bằng Kính Meta Quest 3S (WebXR)
 
-#### 4.1. Cơ Chế Điều Khiển Mặt Phẳng Cánh Tay (Arm-Plane / Cylindrical Navigation - Mặc Định)
-Hệ thống sử dụng cơ chế điều khiển theo **Mặt Phẳng Cánh Tay (Arm-Plane Frame / Hệ Tọa Độ Trụ)**, giúp mọi thao tác di chuyển của robot hoàn toàn ăn khớp tự nhiên với trực giác mắt nhìn:
-- **Đường chuẩn hình học:** Một mặt phẳng thẳng đứng nối từ **Tâm chân đế (Base)** chạy xuyên qua cánh tay ra đến **Đầu gắp (TCP)**.
-- **Tiến Lên (Forward - Đẩy tay ra trước):** Cánh tay robot **duỗi dài ra xa chân đế** dọc theo phương mặt phẳng cánh tay đang vươn tới (Radial Outward). Khi bạn xoay chân đế sang hướng khác (ví dụ từ 12h sang 2h), ấn "Tiến" robot sẽ duỗi thẳng ra xa theo phương 2h mới, thay vì bị kẹt cứng vào phương của mép bàn.
-- **Lùi Lại (Backward - Kéo tay về sau):** Cánh tay robot **co rút lại gần chân đế** dọc theo đường nối đó (Radial Inward).
-- **Sang Trái / Sang Phải (Gạt tay sang hai bên):** Cánh tay robot **quét vòng tròn quanh chân đế** (theo chiều kim đồng hồ hoặc ngược chiều kim đồng hồ quanh trục Base).
-- **Lên Trên / Xuống Dưới (Nâng hạ tay):** Cánh tay robot nâng lên hoặc hạ xuống theo phương thẳng đứng (Trục Z).
+#### 4.1. Cơ Chế Điều Khiển Tọa Độ Trực Quan (Arm-Plane & Cartesian)
+Hệ thống hỗ trợ 2 chế độ điều hướng không gian tùy chọn linh hoạt qua biến môi trường `NAV_MODE`:
 
-*(Lưu ý: Nếu muốn quay về chế độ Descartes cố định mép bàn cũ, bạn có thể thiết lập biến môi trường: `export NAV_MODE=cartesian`)*
+1. **Chế độ Mặt Phẳng Cánh Tay (Arm-Plane Navigation - Mặc Định):**
+   - **Đẩy tay ra trước (Tiến):** Cánh tay robot **duỗi thẳng ra xa chân đế** theo đúng phương vươn tự nhiên của cánh tay (Vector hướng tâm $u_r$).
+   - **Kéo tay về sau (Lùi):** Cánh tay robot **co rút lại gần chân đế** dọc theo phương vươn.
+   - **Gạt tay sang Phải / Trái:** Robot xoay vòng đều quanh trục bệ đỡ chân đế (Vector tiếp tuyến $u_\theta$).
+   - **Nâng Lên / Hạ Xuống:** Robot nâng lên hoặc hạ xuống theo phương thẳng đứng (Trục $\pm Z$).
+   - *Ưu điểm:* Cực kỳ trực quan khi đứng ở bất kỳ góc nhìn nào quanh robot thật, không sợ bị lệch trục khi đế robot xoay ở các góc khác nhau.
 
-#### 4.2. Quy Trình Khởi Động & Căn Chuẩn Hướng Nhìn (Recenter)
-1. **Kết nối mạng:** Đảm bảo kính Meta Quest 3S và PC chạy code kết nối chung một mạng Wi-Fi LAN.
-2. **Xác thực chứng chỉ bảo mật:** Mở trình duyệt Meta Quest Browser:
-   - Truy cập `https://<IP_LAN>:8444` -> Chọn **Advanced** -> Chọn **Proceed to unsafe** (chấp nhận chứng chỉ cho WebSocket).
-   - Truy cập `https://<IP_LAN>:8443` -> Chọn **Advanced** -> Chọn **Proceed to unsafe** (chấp nhận chứng chỉ cho WebXR).
-3. **Kích hoạt chế độ thực tế ảo:** Bấm nút **START IMMERSIVE VR** trên giao diện chào mừng.
-4. **Căn chuẩn góc nhìn (Recenter - Bước bắt buộc để khóa thẳng trục):**
-   - Đứng ở vị trí mặt trước của bàn robot (mặt nhìn thẳng vuông góc vào robot theo trục $+X$).
-   - Giữ đầu nhìn thẳng song song với mặt bàn.
-   - **Nhấn và giữ nút Meta (nút dẹt có logo Meta trên tay cầm phải) trong 2 giây** cho đến khi vòng tròn căn chuẩn đóng lại.
-   - *Kết quả:* Kính Quest sẽ khóa trục nhìn $-Z_{quest}$ trùng khớp 100% với trục $+X_{robot}$ của bàn máy, loại bỏ hiện tượng bị quay lệch sang phải hay trái.
+2. **Chế độ Cartesian Base Link (Khởi động với `NAV_MODE=cartesian`):**
+   - Robot tịnh tiến cố định theo hệ trục của bàn máy ($+X$ tiến sâu vào bàn, $+Y$ sang trái, $\pm Z$ nâng hạ). Phù hợp khi người vận hành đứng cố định đối diện mặt trước của robot.
 
-#### 4.3. Bảng Chức Năng Các Phím Trên Tay Cầm Meta Quest 3S
+#### 4.2. Căn Chuẩn Hướng Nhìn Chuẩn Xác (Recenter Bằng Phím Meta)
+- Khi bắt đầu phiên điều khiển, bạn đứng ở tư thế thoải mái và nhìn thẳng vào cánh tay robot.
+- **Cách đồng bộ trục phòng:** Nhấn giữ phím **Meta / Oculus** trên tay cầm phải trong 2 giây. Hệ điều hành Meta Horizon OS sẽ chốt hướng mắt nhìn thẳng của bạn làm trục chuẩn không gian, đảm bảo toàn bộ cử động tay tịnh tiến và xoay đạt độ chính xác cao nhất.
+
+#### 4.5. Bảng Chức Năng Các Phím Trên Tay Cầm Meta Quest 3S
 
 | Phím bấm | Ngón tay thao tác | Cơ chế điều khiển | Mô tả chi tiết hành vi |
 | :--- | :--- | :--- | :--- |
-| **Nhấn cần gạt Thumbstick (R3/L3)** | Ngón cái | **Về Vị Trí An Toàn (Go Home)** | **Nhấn 1 lần vào cần gạt Analog** (hoặc nhấn giữ nút B/Y trong 1 giây) để tự động đưa cánh tay robot về vị trí Home an toàn. Tay cầm rung xác nhận 2 nhịp, tự động mở khóa bảo vệ và tái kích hoạt Teleop khi về đích. |
-| **Nút B (Tay phải) / Y (Tay trái)** | Ngón cái | **Chuyển Chế Độ / Về Home** | - **Bấm nhanh (< 1s):** Chuyển đổi giữa **Edit Mode** (chỉnh UI Cockpit) và **Drive Mode** (lái robot).<br>- **Nhấn giữ (> 1s):** Kích hoạt lệnh **Go Home** đưa robot về vị trí an toàn. |
-| **Cò Trỏ (Index Trigger)** | Ngón trỏ | **Tịnh Tiến Không Gian (Arm-Plane)** | Bấm giữ cò và di chuyển tay trong không gian để tịnh tiến đầu robot (Tiến/Lùi dọc theo cánh tay, Trái/Phải quét vòng tròn, Lên/Xuống). Góc xoay cổ tay được khóa cố định. |
+| **Nhấn cần gạt Thumbstick (R3/L3)** | Ngón cái | **Về Vị Trí An Toàn (Go Home)** | **Nhấn 1 lần vào cần gạt Analog** (hoặc nhấn giữ nút B/Y trong 3 giây) để tự động đưa cánh tay robot về vị trí Home an toàn. Tay cầm rung xác nhận 2 nhịp, tự động mở khóa bảo vệ và tái kích hoạt Teleop khi về đích. |
+| **Nút B (Tay phải) / Y (Tay trái)** | Ngón cái | **Chuyển Chế Độ / Về Home** | - **Bấm nhanh (< 3s):** Chuyển đổi giữa **Edit Mode** (chỉnh UI Cockpit) và **Drive Mode** (lái robot).<br>- **Nhấn giữ (> 3s):** Kích hoạt lệnh **Go Home** đưa robot về vị trí an toàn. |
+| **Cò Trỏ (Index Trigger)** | Ngón trỏ | **Tịnh Tiến Không Gian (Arm-Plane / Cartesian)** | Bấm giữ cò và di chuyển tay trong không gian để tịnh tiến đầu robot. Đã tích hợp bộ bù trừ hướng đầu tự động (Headset View Compensation). Góc xoay cổ tay được khóa cố định. |
 | **Nút Hông (Hand Grip)** | Ngón giữa / ngón áp út | **Xoay Đầu Công Cụ (Tool-Centric)** | Bấm giữ nút hông và xoay cổ tay để điều chỉnh hướng chúc/ngửa/nghiêng của ngàm kẹp theo hệ trục của camera cổ tay. Tọa độ vị trí XYZ được giữ nguyên. |
 | **Nút A (Tay phải) / X (Tay trái)** | Ngón cái | **Bật / Tắt Ngàm Kẹp (Gripper)** | Nhấn để đóng ngàm kẹp gắp quả cà chua, nhấn lần nữa để mở ngàm thả vật thể vào giỏ. |
-| **Nút Meta (Oculus)** | Ngón cái (Tay phải) | **Căn Chuẩn Trục Nhìn (Recenter)** | Nhấn giữ 2 giây để đồng bộ lại hướng nhìn thẳng của kính với trục bàn robot. |
+| **Nút Meta (Oculus)** | Ngón cái (Tay phải) | **Căn Chuẩn Trục Nhìn (Recenter)** | Nhấn giữ 2 giây để đồng bộ lại hệ trục phòng của kính Meta Quest. |
 
-#### 4.4. Cơ Chế Khóa Trục Thông Minh (Soft Axis Snapping)
+#### 4.6. Cơ Chế Khóa Trục Thông Minh (Soft Axis Snapping)
 Nhằm triệt tiêu hiện tượng cánh tay người bị rung lắc hoặc uốn cong vô thức khi vươn tay trong không khí tự do, hệ thống tích hợp bộ lọc khóa trục thông minh:
 - **Khi đẩy thẳng (Tiến / Lùi theo trục X):** Khi phát hiện bạn đang chủ đích đưa tay ra trước hoặc kéo về sau, hệ thống tự động triệt tiêu các dao động lệch ngang ($\Delta Y \approx 0$). Cánh tay robot UR3e sẽ chuyển động thẳng tắp dọc theo trục bàn như đang trượt trên thanh ray cơ khí.
 - **Khi gạt ngang (Trái / Phải theo trục Y):** Chuyển động dọc trục X được nén phẳng, robot lướt ngang song song với mép bàn.
 - **Khi nâng hạ (Lên / Xuống theo trục Z):** Dao động trôi ngang mặt phẳng XY được nén phẳng, giúp robot nâng hoặc hạ quả cà chua thẳng đứng mà không va quẹt vào thành giỏ hay mặt bàn.
 - **Khi di chuyển chéo góc tự do:** Khi người điều khiển chủ ý đưa tay theo đường chéo (tỷ lệ giữa 2 trục lớn hơn 45%), hệ thống tự động mở khóa hoàn toàn để cho phép điều hướng tự do trong không gian 3 chiều.
 
-#### 4.5. Kỹ Thuật Ly Hợp Điều Khiển Tầm Xa (Smart Clutching)
+#### 4.7. Kỹ Thuật Ly Hợp Điều Khiển Tầm Xa (Smart Clutching)
 Khi cần điều khiển robot di chuyển quãng đường dài vượt quá tầm với tự nhiên của sải tay:
 1. Bấm giữ Cò trỏ và đưa tay về phía trước đến hết tầm với thoải mái.
 2. **Nhả Cò trỏ:** Cánh tay robot sẽ dừng lại và giữ nguyên vị trí hiện tại trên bàn.
 3. Rút tay cầm về gần ngực hoặc vị trí thoải mái nhất của cơ thể.
 4. **Bấm giữ lại Cò trỏ:** Hệ thống tự động neo mốc mới (Reset Anchor). Robot tiếp tục di chuyển tiến tới từ vị trí đang đứng một cách mượt mà, hoàn toàn không bị giật hay nhảy cóc tọa độ (Zero Teleport).
+
+#### 4.8. Hướng Dẫn Kết Nối Trực Tiếp Kính Meta Quest Qua Developer Mode & Cáp USB (ADB Reverse)
+Kết nối trực tiếp qua cáp USB Type-C thông qua chế độ **Developer Mode** và công cụ **ADB Reverse Port Forwarding** là phương thức kết nối tối ưu nhất cho môi trường thử nghiệm và phòng lab:
+- **Độ trễ tiệm cận 0ms (Zero Latency):** Dữ liệu truyền nhận trực tiếp qua băng thông dây cáp đồng, triệt tiêu hoàn toàn rủi ro giật lag, rớt gói tin hay nghẽn mạng do sóng Wi-Fi yếu.
+- **Địa chỉ cố định siêu tiện lợi:** Người dùng truy cập thẳng vào `https://localhost:8443` ngay trên kính, không cần nhập địa chỉ IP mạng LAN dài dòng và không bị ảnh hưởng mỗi khi máy tính đổi mạng Wi-Fi khác.
+- **Quan sát màn hình và gỡ lỗi từ xa (Chrome Remote Inspection):** Cho phép người ngồi tại máy tính quan sát trực tiếp góc nhìn của người đeo kính trong thời gian thực, theo dõi console log và kiểm soát toàn bộ trạng thái hệ thống.
+
+##### 1. Kích hoạt Developer Mode trên kính Meta Quest (Chỉ làm 1 lần duy nhất)
+1. Tải và mở ứng dụng **Meta Horizon** trên điện thoại (đã liên kết với kính Quest).
+2. Chọn biểu tượng **Devices (Thiết bị)** ở góc dưới -> Chọn kính **Meta Quest 3S** -> Nhấp vào **Headset Settings (Cài đặt kính)**.
+3. Chọn mục **Developer Mode (Chế độ nhà phát triển)** -> Gạt nút bật sang **ON**.
+   *(Lưu ý: Nếu tài khoản Meta chưa đăng ký Tổ chức Nhà phát triển, ứng dụng sẽ cung cấp đường dẫn đến `developer.oculus.com` để tạo một Organization miễn phí chỉ trong 1 phút).*
+
+##### 2. Cài đặt công cụ ADB trên máy tính Ubuntu
+Mở terminal trên Ubuntu và cài đặt gói công cụ Android Tools tiêu chuẩn:
+```bash
+sudo apt update && sudo apt install -y adb
+```
+
+##### 3. Cắm cáp USB-C và cấp quyền ủy quyền gỡ lỗi (USB Debugging)
+1. Cắm cáp USB Type-C (khuyên dùng cổng USB 3.0/3.1 màu xanh hoặc cổng USB-C tốc độ cao) kết nối giữa máy tính Ubuntu và kính Meta Quest.
+2. Đeo kính lên mắt: Khi màn hình xuất hiện hộp thoại popup **Allow USB Debugging? (Cho phép gỡ lỗi USB?)**:
+   - Dùng cần gạt/tia laser tích chọn vào ô: **Always allow from this computer (Luôn cho phép từ máy tính này)**.
+   - Nhấp vào nút **Allow (Cho phép)**.
+3. Kiểm tra kết nối từ terminal máy tính:
+   ```bash
+   adb devices
+   ```
+   Kết quả hiển thị trạng thái chuẩn:
+   ```text
+   List of devices attached
+   340YC10G7F09S1    device
+   ```
+   *(Nếu hiển thị chữ `unauthorized`, hãy đeo kính lên mắt và nhấp xác nhận quyền truy cập).*
+
+##### 4. Thiết lập chuyển tiếp cổng mạng (ADB Reverse)
+Chạy script tự động đã được tích hợp sẵn trong kho mã nguồn:
+```bash
+bash teleop_quest/setup_quest_adb.sh
+```
+Script sẽ tự động kiểm tra thiết bị và ánh xạ toàn bộ 4 cổng dịch vụ cốt lõi từ PC sang kính:
+- `8443`: Máy chủ WebXR HTTPS (Giao diện điều khiển Cockpit và buồng lái ảo).
+- `8444`: Kênh WebSocket bảo mật WSS (Truyền nhận dữ liệu tọa độ 6DoF tay cầm, camera MJPEG và telemetry).
+- `8445`: Kênh WebSocket nội bộ WS phục vụ bản xem trước PC.
+- `8080`: Máy chủ hiển thị 3D Viser Dashboard.
+
+##### 5. Mở giao diện điều khiển trên kính Meta Quest
+1. Đeo kính lên mắt, mở ứng dụng **Meta Quest Browser**.
+2. Nhập chính xác địa chỉ:
+   ```text
+   https://localhost:8443
+   ```
+3. Khi trình duyệt hiển thị cảnh báo chứng chỉ SSL tự ký:
+   - Nhấp vào **Advanced (Nâng cao)**.
+   - Chọn **Proceed to localhost (Tiếp tục truy cập an toàn)**.
+4. Giao diện buồng lái **UR3e Teleoperation Cockpit** xuất hiện. Nhấp vào nút **Enter VR** màu xanh lục để bắt đầu điều khiển cánh tay robot.
+
+##### 6. Giám sát góc nhìn người dùng và gỡ lỗi từ xa qua Chrome trên PC
+Để người giám sát trên máy tính có thể quan sát trực tiếp màn hình kính Quest và đọc nhật ký lỗi:
+1. Mở trình duyệt Google Chrome trên máy tính Ubuntu.
+2. Nhập vào thanh địa chỉ:
+   ```text
+   chrome://inspect/#devices
+   ```
+3. Trong mục thiết bị được nhận diện, tìm mục kính Meta Quest, tìm dòng trang web `Meta Quest VR Teleop` và nhấp vào chữ **inspect**.
+4. Cửa sổ Chrome DevTools sẽ mở ra, hiển thị hình ảnh màn hình kính đang hoạt động ở khung bên trái cùng toàn bộ bảng điều khiển Console / Network ở khung bên phải.
+
+##### 7. Xử lý các tình huống thường gặp (Troubleshooting)
+- **Thiết bị báo trạng thái `unauthorized`:** Do người đeo kính chưa bấm "Allow" trên màn hình VR. Đeo kính lên, mở khóa màn hình và chọn "Always allow from this computer".
+- **Kính không tải được trang `localhost:8443` sau khi cắm lại cáp:** Mỗi khi rút cáp USB ra và cắm lại, các cổng reverse sẽ bị hệ điều hành reset. Bạn chỉ cần chạy lại lệnh `bash teleop_quest/setup_quest_adb.sh` để tái lập toàn bộ kết nối.
 
 ---
 
@@ -491,7 +557,7 @@ Kiểm tra toàn vẹn các episode: xác minh không có giá trị `NaN`/`Inf`
 | **Tần số Camera Stream** | 20 FPS | Truyền phát luồng hình ảnh thời gian thực tới Viser và WebXR Cockpit. |
 | **ServoJ Lookahead Time** | `0.12` s | Nội suy dự đoán đa chu kỳ chuẩn Universal Robots, triệt tiêu vi rung giật. |
 | **ServoJ Gain** | `250` | Độ cứng vị trí tối ưu trên robot vật lý, giúp chuyển động lướt êm ái không bị gắt cơ học. |
-| **Vận tốc khớp tối đa (Rate Limiter)** | `0.5` rad/s ($\approx 28.6^\circ$/s) | Scaled Vector Limiter co giãn đồng bộ cả 6 khớp, tạo tốc độ di chuyển đầm chắc chuẩn Manual Jog. |
+| **Vận tốc khớp tối đa (Rate Limiter)** | `0.6` rad/s ($\approx 34.4^\circ$/s) | Scaled Vector Limiter co giãn đồng bộ cả 6 khớp, phản hồi nhanh nhạy và mượt mà. |
 | **Ngưỡng phát hiện vặn xoắn khớp** | `1.5` rad | Chặn những bước nhảy đột ngột do đảo nghiệm IK gần điểm kỳ dị. |
 | **Giới hạn khớp khuỷu (elbow_joint)** | `[-2.80, 2.80]` rad | Cho phép gập sâu tự nhiên (~160 độ) khi hạ thấp gắp cà chua, CuRobo tự quản lý va chạm. |
 | **Giới hạn khớp cổ tay (wrist_1, wrist_2)** | `[-2π, 2π]` rad | Duy trì dải quay đầy đủ của URDF, loại bỏ triệt để hiện tượng đảo nhánh vặn xoắn. |
@@ -502,7 +568,7 @@ Kiểm tra toàn vẹn các episode: xác minh không có giá trị `NaN`/`Inf`
 | **Số hạt giống CuRobo IK** | 64 seeds | Nâng cao xác suất tìm nghiệm liên tục trên GPU. |
 | **Hệ số phạt lệch nhánh IK** | `50.0` (khi lệch $> 0.8$ rad) | Giữ robot luôn ở nhánh động học đồng nhất với vị trí hiện tại. |
 | **Deadband tĩnh tay cầm VR** | 5 mm (`0.005` m) | Loại bỏ rung tay sinh lý với cơ chế trừ mềm (Soft Deadband). |
-| **Tỷ lệ truyền chuyển động tay (scale)** | `0.6` | Tỷ lệ 60% giúp thao tác tinh chỉnh cực kỳ chính xác, tránh hiện tượng quá trớn. |
-| **Độ lệch tay cầm tối đa (max_delta_m)** | `0.18` m | Phạm vi kéo tay mỗi nhịp bóp cò, tạo cảm giác thoải mái. |
-| **Bộ lọc làm mượt EMA (Alpha)** | `0.25` | Chuyển động lướt êm ái, đầm chắc như cần gạt thủy lực. |
+| **Tỷ lệ truyền chuyển động tay (scale)** | `0.75` | Tỷ lệ 75% giúp robot bám sát chuyển động tay nhanh nhạy, giảm mỏi khi vung tay. |
+| **Độ lệch tay cầm tối đa (max_delta_m)** | `0.22` m | Phạm vi vươn dài hơn mỗi nhịp bóp cò, thoải mái bao quát không gian làm việc. |
+| **Bộ lọc làm mượt EMA (Alpha)** | `0.28` | Giảm độ trễ lọc tín hiệu từ 200ms xuống ~170ms, giúp bám tay tức thì mà vẫn êm ái. |
 | **Ngưỡng thời gian Auto-Snap** | 1.2 s | Tự động kéo XYZ về đầu tay máy và reset seed khi bị kẹt tư thế hoặc vướng vật cản. |

@@ -1,8 +1,10 @@
 import os
 import time
+import socket
 import threading
 import numpy as np
 import torch
+from curobo.types import JointState
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MODULE 1: CuRobo IK Solver
@@ -24,8 +26,6 @@ class CuRoboIKSolver:
             return {"q": None, "latency_ms": (time.perf_counter() - t0) * 1000, "solver": "curobo"}
 
     def fk(self, q: list) -> dict:
-        import torch
-        from curobo.types import JointState
         js = torch.tensor([q], device="cuda", dtype=torch.float32)
         js_obj = JointState.from_position(js, joint_names=self._ik.solver.kinematics.joint_names)
         kin_state = self._ik.solver.kinematics.compute_kinematics(js_obj)
@@ -77,15 +77,6 @@ class SafetyGate:
 # ─────────────────────────────────────────────────────────────────────────────
 # MODULE 3: ServoJ Executor  (dùng RTDEControlInterface - ĐÚNG cách)
 # ─────────────────────────────────────────────────────────────────────────────
-# Input:  q = [6 Radian] đã qua SafetyGate
-# Output: None (gọi RTDEControlInterface.servoJ trực tiếp)
-#
-# Lý do KHÔNG dùng send_urscript() + "def s(): servoj() end":
-#   Gửi chương trình URScript mới mỗi 50ms qua port 30002 sẽ ngắt chương trình
-#   cũ trước khi robot kịp thực hiện → robot đứng im.
-#   RTDEControlInterface.servoJ() duy trì vòng lặp realtime trong bộ điều khiển,
-#   không bị gián đoạn giữa các lần gọi.
-#
 class ServoJExecutor:
     ROBOT_IP = os.environ.get("ROBOT_IP", "127.0.0.1")
 
@@ -94,64 +85,66 @@ class ServoJExecutor:
         self._lookahead = float(os.environ.get("SERVO_LOOKAHEAD", str(lookahead_time)))
         self._gain = int(os.environ.get("SERVO_GAIN", str(gain)))
         self._ctrl = None
+        self._lock = threading.Lock()
 
     def connect(self):
         """Khởi tạo RTDEControlInterface. Gọi 1 lần khi bật Teleop."""
-        import rtde_control
-        if self._ctrl is not None:
+        with self._lock:
+            import rtde_control
+            if self._ctrl is not None:
+                try:
+                    if self._ctrl.isConnected():
+                        return
+                except Exception:
+                    pass
+
+            robot_ip = os.environ.get("ROBOT_IP", self.ROBOT_IP)
+
+            # Dừng script cũ trên robot qua Dashboard (Port 29999) để giải phóng hoàn toàn thanh ghi RTDE
             try:
-                if self._ctrl.isConnected():
-                    return
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(1.0)
+                s.connect((robot_ip, 29999))
+                s.recv(1024)
+                s.sendall(b"stop\n")
+                time.sleep(0.1)
+                s.recv(1024)
+                s.close()
             except Exception:
                 pass
 
-        robot_ip = os.environ.get("ROBOT_IP", self.ROBOT_IP)
-
-        # Dừng script cũ trên robot qua Dashboard (Port 29999) để giải phóng hoàn toàn thanh ghi RTDE
-        try:
-            import socket
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(1.0)
-            s.connect((robot_ip, 29999))
-            s.recv(1024)
-            s.sendall(b"stop\n")
-            time.sleep(0.1)
-            s.recv(1024)
-            s.close()
-        except Exception:
-            pass
-
-        try:
-            self._ctrl = rtde_control.RTDEControlInterface(robot_ip)
-            print(f"[ServoJ] RTDEControl connected: {self._ctrl.isConnected()}")
-        except Exception as e:
-            err_msg = str(e).lower()
-            if "input registers are already in use" in err_msg or "fieldbus" in err_msg:
-                print("[ServoJ] Xung đột thanh ghi, thử dải Upper Range Registers...")
-                try:
-                    flags_upper = int(rtde_control.RTDEControlInterface.FLAG_UPLOAD_SCRIPT) | int(rtde_control.RTDEControlInterface.FLAG_UPPER_RANGE_REGISTERS)
-                    self._ctrl = rtde_control.RTDEControlInterface(robot_ip, -1.0, flags_upper)
-                    print(f"[ServoJ] RTDEControl connected (Upper Range Registers): {self._ctrl.isConnected()}")
-                except Exception as inner_e:
-                    print(f"[ServoJ] Không thể kết nối RTDE Control: {inner_e}")
+            try:
+                self._ctrl = rtde_control.RTDEControlInterface(robot_ip)
+                print(f"[ServoJ] RTDEControl connected: {self._ctrl.isConnected()}")
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "input registers are already in use" in err_msg or "fieldbus" in err_msg:
+                    print("[ServoJ] Xung đột thanh ghi, thử dải Upper Range Registers...")
+                    try:
+                        flags_upper = int(rtde_control.RTDEControlInterface.FLAG_UPLOAD_SCRIPT) | int(rtde_control.RTDEControlInterface.FLAG_UPPER_RANGE_REGISTERS)
+                        self._ctrl = rtde_control.RTDEControlInterface(robot_ip, -1.0, flags_upper)
+                        print(f"[ServoJ] RTDEControl connected (Upper Range Registers): {self._ctrl.isConnected()}")
+                    except Exception as inner_e:
+                        print(f"[ServoJ] Không thể kết nối RTDE Control: {inner_e}")
+                        self._ctrl = None
+                else:
+                    print(f"[ServoJ] Lỗi kết nối RTDE: {e}")
+                    if "remote control" in err_msg:
+                        print("[Gợi ý] Hãy bật Remote Control trên PolyScope (góc trên phải màn hình Teach Pendant).")
                     self._ctrl = None
-            else:
-                print(f"[ServoJ] Lỗi kết nối RTDE: {e}")
-                if "remote control" in err_msg:
-                    print("[Gợi ý] Hãy bật Remote Control trên PolyScope (góc trên phải màn hình Teach Pendant).")
-                self._ctrl = None
 
     def disconnect(self):
         """Dừng servoJ và ngắt kết nối. Gọi 1 lần khi tắt Teleop."""
-        if self._ctrl:
-            try:
-                self._ctrl.servoStop()
-                self._ctrl.stopScript()
-                self._ctrl.disconnect()
-            except Exception:
-                pass
-            self._ctrl = None
-            print("[ServoJ] RTDEControl disconnected.")
+        with self._lock:
+            if self._ctrl:
+                try:
+                    self._ctrl.servoStop()
+                    self._ctrl.stopScript()
+                    self._ctrl.disconnect()
+                except Exception:
+                    pass
+                self._ctrl = None
+                print("[ServoJ] RTDEControl disconnected.")
 
     def send(self, q):
         """
@@ -166,20 +159,21 @@ class ServoJExecutor:
           lookahead_time = nội suy mượt (0.03–0.2s)
           gain         = độ cứng bám vị trí (100–2000)
         """
-        if self._ctrl is None:
-            return
-        try:
-            # RTDEControlInterface C++ bindings only support positional arguments
-            self._ctrl.servoJ(
-                q,
-                0.0,               # speed
-                0.0,               # acceleration
-                self._dt,          # dt
-                self._lookahead,   # lookahead_time
-                self._gain         # gain
-            )
-        except Exception as e:
-            print(f"[ServoJ] Lỗi: {e}")
+        with self._lock:
+            if self._ctrl is None:
+                return
+            try:
+                # RTDEControlInterface C++ bindings only support positional arguments
+                self._ctrl.servoJ(
+                    q,
+                    0.0,               # speed
+                    0.0,               # acceleration
+                    self._dt,          # dt
+                    self._lookahead,   # lookahead_time
+                    self._gain         # gain
+                )
+            except Exception as e:
+                pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -271,8 +265,8 @@ class TeleoperationController:
                 
                 # Scaled Vector Rate Limiter: Co giãn đồng thời cả 6 khớp theo cùng một tỷ lệ
                 # để bảo toàn 100% hướng vector chuyển động trong không gian Descartes (không làm méo lệch quỹ đạo)
-                # Mặc định 0.5 rad/s (~28.6 độ/s) cho chuyển động đầm chắc, êm dịu chuẩn manual jog
-                MAX_VEL = float(os.environ.get("MAX_JOINT_VEL", "0.5"))
+                # Mặc định 0.6 rad/s (~34.4 độ/s) cho phản hồi nhanh nhạy, bắt kịp chuyển động tay
+                MAX_VEL = float(os.environ.get("MAX_JOINT_VEL", "0.6"))
                 DT = self._dt
                 max_dq = MAX_VEL * DT
                 dq = [q_target[i] - self._last_valid_q[i] for i in range(6)]

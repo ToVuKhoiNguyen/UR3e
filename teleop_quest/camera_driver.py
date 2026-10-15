@@ -1,5 +1,3 @@
-import math
-import os
 import threading
 import time
 from typing import Optional, Union

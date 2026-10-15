@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Meta Quest VR Teleop</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=8">
+    <link rel="stylesheet" href="style.css?v=9">
 </head>
 
 <body>
@@ -49,8 +49,8 @@
             <!-- Header -->
             <div class="cockpit-header">
                 <div class="header-left">
-                    <button id="btn-toggle-ui" class="btn-top-menu" style="background: #f59e0b;">
-                        <span></span> Lock UI (Drive Mode) [B/Y]
+                    <button id="btn-toggle-ui" class="btn-top-menu" style="background: #10b981;">
+                        <span></span> Unlock UI (Edit Mode) [B/Y]
                     </button>
                     <button id="btn-home-vr" class="btn-top-menu" style="background: #3b82f6; margin-left: 8px;">
                         <span></span> Go Home [Thumbstick]
@@ -58,6 +58,7 @@
                 </div>
                 <div class="header-center">
                     <span class="title">UR3e Teleoperation</span>
+                    <span id="robot-status-badge" class="badge green" style="margin-left: 12px; font-size: 13px; padding: 4px 12px; font-weight: 600;">Standby</span>
                 </div>
                 <div class="header-right">
                     <button id="btn-exit-vr" class="btn-top-menu">
@@ -116,7 +117,7 @@
                         </div>
                         <div class="card-row">
                             <span>Mode (Btn B/Y):</span>
-                            <span id="val-mode" class="badge orange">Edit Mode</span>
+                            <span id="val-mode" class="badge green">Drive Mode</span>
                         </div>
                         <div class="card-row">
                             <span>Gripper (Btn A/X):</span>
@@ -124,7 +125,7 @@
                         </div>
                         <div class="card-row">
                             <span>Go Home:</span>
-                            <span id="val-home-btn" class="badge gray">Thumbstick / Hold B</span>
+                            <span id="val-home-btn" class="badge gray">Thumbstick / Hold B (&gt;3s)</span>
                         </div>
                     </div>
 

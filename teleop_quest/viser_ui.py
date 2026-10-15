@@ -1,5 +1,6 @@
 import time
 import subprocess
+import cv2
 import numpy as np
 import torch
 import transforms3d
@@ -200,7 +201,6 @@ class TeleopViserUI:
 
     def update_cam_preview(self, frame_rgb: np.ndarray):
         """Cập nhật ảnh xem trực tiếp camera cổ tay lên sidebar Viser"""
-        import cv2
         thumb = cv2.resize(frame_rgb, (200, 150))
         self.ui_cam_preview.image = thumb
 
