@@ -6,9 +6,11 @@ Hệ thống điều khiển viễn thao thời gian thực (Real-time Teleopera
 
 ## 1. Tính Năng Nổi Bật
 
-1. **Điều khiển Viễn Thao Thời Gian Thực (20Hz RTDE servoJ):**
+1. **Điều khiển Viễn Thao Thời Gian Thực (20Hz RTDE servoJ & Tách Luồng Camera):**
    - Đồng bộ chuyển động 6DoF từ tay cầm Meta Quest 3S hoặc chuột máy tính (Viser 3D Transform Controls Target Widget) sang robot UR3e với độ trễ cực thấp.
-   - Bộ thực thi `ServoJExecutor` sử dụng tham số tối ưu cho chu kỳ 20Hz: `dt = 0.05`s, `lookahead_time = 0.04`s, `gain = 800`.
+   - Bộ thực thi `ServoJExecutor` sử dụng tham số tối ưu chuẩn công nghiệp: `dt = 0.05`s, `lookahead_time = 0.12`s, `gain = 250`.
+   - Cơ chế **Scaled Vector Rate Limiter** co giãn đồng bộ cả 6 khớp khi vượt ngưỡng vận tốc, bảo toàn 100% hướng vector trong không gian Descartes và loại bỏ hoàn toàn hiện tượng méo quỹ đạo/giật cục.
+   - Kiến trúc đa luồng (Multithreading): Tách riêng luồng render và truyền stream camera cổ tay, triệt tiêu hoàn toàn jitter timing cho vòng lặp điều khiển RTDE.
    - Chế độ điều khiển VR phân tách chức năng:
      - **Chỉ bóp Cò (Trigger):** Tịnh tiến không gian (World-Centric mapping, khóa góc xoay).
      - **Chỉ bóp Grip (Nút hông):** Xoay đầu hút/gắp theo hệ tọa độ đầu công cụ (Tool-Centric mapping, khóa tịnh tiến).
@@ -68,7 +70,7 @@ Hệ thống điều khiển viễn thao thời gian thực (Real-time Teleopera
 12. **Các Lớp Bảo Vệ An Toàn (Safety Gate & Singularity Guard):**
     - **Giám sát điểm kỳ dị (Singularity Guard):** Đánh giá ma trận Jacobian thời gian thực, tự động chặn lệnh nếu giá trị suy biến nhỏ nhất $\sigma_{min} < 0.035$.
     - **Chống chúi cắm bắp tay:** Giới hạn góc nâng vai `shoulder_lift_joint` $\le +0.05$ rad để ngăn ngừa rủi ro đâm bắp tay xuống mặt bàn.
-    - **Giới hạn tốc độ và gia tốc (Rate Limiter):** Kẹp vận tốc góc khớp tối đa $\le 2.0$ rad/s (tối đa 0.1 rad mỗi bước 50ms) để bảo vệ động cơ robot vật lý.
+    - **Giới hạn tốc độ và gia tốc (Scaled Vector Rate Limiter):** Kẹp vận tốc góc khớp tối đa $\le 0.5$ rad/s ($\approx 28.6^\circ$/s, tối đa 0.025 rad mỗi bước 50ms) để tái hiện chuyển động êm ái, đầm chắc chuẩn manual jog của Teach Pendant.
     - **Phát hiện lật nhánh IK:** Chặn các bước nhảy góc khớp đột ngột (`max_jump > 1.5` rad).
     - **Giám sát mất kết nối (Timeout Watchdog):** Tự động dừng khẩn cấp robot qua `servoStop` nếu mất tín hiệu VR quá thời gian timeout.
 
@@ -145,7 +147,7 @@ Trong mỗi chu kỳ 50ms của `teleop_quest/main_quest.py`, hệ thống thự
 3. **Bước 3: Kiểm định an toàn và điểm kỳ dị (`SafetyGate` & `SingularityGuard`):**
    - Đánh giá ma trận Jacobian của cấu hình góc khớp mục tiêu, đo lường giá trị suy biến nhỏ nhất $\sigma_{min}$.
    - Nếu $\sigma_{min} < 0.035$ (tư thế tiến sát điểm kỳ dị), cổng an toàn lập tức chặn lệnh, phát xung rung cảnh báo về tay cầm VR và giữ robot đứng yên.
-   - Khối Rate Limiter kiểm tra và kẹp biến thiên vận tốc khớp tối đa $\le 2.0$ rad/s để triệt tiêu hiện tượng rung giật động cơ.
+   - Khối Rate Limiter kiểm tra và kẹp biến thiên vận tốc khớp tối đa $\le 0.5$ rad/s để tạo chuyển động êm dịu, không giật cục.
 
 4. **Bước 4: Thực thi lệnh chuyển động thời gian thực (`ServoJExecutor`):**
    - Đảm bảo giải phóng thanh ghi RTDE thông qua lệnh Dashboard `stop\n`.
@@ -274,15 +276,15 @@ source ~/curobo/.venv/bin/activate
 # 1. Chạy với URSim mô phỏng (Camera ảo 3D - Mặc định):
 python3 main.py
 
-# 2. Chạy với Robot UR3e thật (Chỉ định IP robot):
-python3 main.py --robot-ip 192.168.1.100
+# 2. Chạy với Robot UR3e thật (Đã kiểm thử thành công tại Lab):
+python3 main.py --robot-ip 10.42.0.242
 
-# 3. Chạy với Camera vật lý thật gắn trên cổ tay (USB Camera / RealSense):
-python3 main.py --robot-ip 192.168.1.100 --camera real --camera-device 0
+# 3. Chạy với Robot UR3e thật kèm Camera vật lý (USB Camera / RealSense):
+python3 main.py --robot-ip 10.42.0.242 --camera real --camera-device 0
 ```
 
 Các tham số dòng lệnh được hỗ trợ:
-- `--robot-ip`: Địa chỉ IP của Robot thật hoặc URSim (mặc định: `127.0.0.1`).
+- `--robot-ip`: Địa chỉ IP của Robot thật hoặc URSim (ví dụ đã kiểm thử: `10.42.0.242`, mặc định: `127.0.0.1`).
 - `--camera`: Nguồn camera cổ tay: `synthetic` (mô phỏng) hoặc `real` (camera thật) (mặc định: `synthetic`).
 - `--camera-device`: Chỉ số Device ID của camera thật (mặc định: `0`).
 
@@ -301,18 +303,54 @@ Hệ thống sẽ hiển thị các cổng truy cập:
 4. **Điều khiển chuyển động:** Dùng chuột nhấp và kéo các trục mũi tên hoặc vòng xoay của khối Target Widget 3D: Cánh tay robot sẽ chuyển động bám theo tọa độ đích của chuột trong thời gian thực.
 5. **Trở về vị trí an toàn:** Bấm nút **Go to Home** khi cần đưa robot về vị trí mặc định an toàn. Quỹ đạo chuyển động được điều phối mượt mà không rung giật (MoveJ 500Hz), không glitch hình ảnh và tự động kích hoạt lại chế độ Teleop sau khi robot về đích.
 
-### Bước 4: Điều khiển bằng Kính Meta Quest 3S (WebXR)
-1. Đảm bảo kính Meta Quest 3S và máy tính kết nối cùng mạng Wi-Fi LAN.
-2. Trên trình duyệt Meta Quest Browser:
-   - Truy cập `https://<IP_LAN>:8444` -> Chọn **Advanced** -> **Proceed to unsafe** (chấp nhận chứng chỉ SSL tự sinh cho kênh WebSocket).
-   - Truy cập `https://<IP_LAN>:8443` -> Chọn **Advanced** -> **Proceed to unsafe** (chấp nhận chứng chỉ SSL cho kênh WebXR).
-3. Bấm **START IMMERSIVE VR** trên màn hình chào mừng.
-4. **Các thao tác tay cầm:**
-   - **Bóp Cò (Trigger):** Tịnh tiến đầu robot trong không gian (trái/phải, tiến/lùi, lên/xuống).
-   - **Bóp Grip (Nút hông):** Xoay cổ tay robot theo hướng tay cầm.
-   - **Nút B / Y trên tay cầm:** Phím nóng chuyển đổi tức thì giữa Edit Mode (tương tác UI) và Drive Mode (lái robot) kèm phản hồi rung Haptic.
-   - **Nút A / X trên tay cầm:** Bật/tắt ngàm kẹp Gripper để gắp hoặc thả quả cà chua.
-   - **Khung Camera Stream:** Hiển thị góc nhìn trực tiếp từ đầu tay máy robot theo thời gian thực.
+### Bước 4: Hướng Dẫn Chi Tiết Điều Khiển Bằng Kính Meta Quest 3S (WebXR)
+
+#### 4.1. Cơ Chế Điều Khiển Mặt Phẳng Cánh Tay (Arm-Plane / Cylindrical Navigation - Mặc Định)
+Hệ thống sử dụng cơ chế điều khiển theo **Mặt Phẳng Cánh Tay (Arm-Plane Frame / Hệ Tọa Độ Trụ)**, giúp mọi thao tác di chuyển của robot hoàn toàn ăn khớp tự nhiên với trực giác mắt nhìn:
+- **Đường chuẩn hình học:** Một mặt phẳng thẳng đứng nối từ **Tâm chân đế (Base)** chạy xuyên qua cánh tay ra đến **Đầu gắp (TCP)**.
+- **Tiến Lên (Forward - Đẩy tay ra trước):** Cánh tay robot **duỗi dài ra xa chân đế** dọc theo phương mặt phẳng cánh tay đang vươn tới (Radial Outward). Khi bạn xoay chân đế sang hướng khác (ví dụ từ 12h sang 2h), ấn "Tiến" robot sẽ duỗi thẳng ra xa theo phương 2h mới, thay vì bị kẹt cứng vào phương của mép bàn.
+- **Lùi Lại (Backward - Kéo tay về sau):** Cánh tay robot **co rút lại gần chân đế** dọc theo đường nối đó (Radial Inward).
+- **Sang Trái / Sang Phải (Gạt tay sang hai bên):** Cánh tay robot **quét vòng tròn quanh chân đế** (theo chiều kim đồng hồ hoặc ngược chiều kim đồng hồ quanh trục Base).
+- **Lên Trên / Xuống Dưới (Nâng hạ tay):** Cánh tay robot nâng lên hoặc hạ xuống theo phương thẳng đứng (Trục Z).
+
+*(Lưu ý: Nếu muốn quay về chế độ Descartes cố định mép bàn cũ, bạn có thể thiết lập biến môi trường: `export NAV_MODE=cartesian`)*
+
+#### 4.2. Quy Trình Khởi Động & Căn Chuẩn Hướng Nhìn (Recenter)
+1. **Kết nối mạng:** Đảm bảo kính Meta Quest 3S và PC chạy code kết nối chung một mạng Wi-Fi LAN.
+2. **Xác thực chứng chỉ bảo mật:** Mở trình duyệt Meta Quest Browser:
+   - Truy cập `https://<IP_LAN>:8444` -> Chọn **Advanced** -> Chọn **Proceed to unsafe** (chấp nhận chứng chỉ cho WebSocket).
+   - Truy cập `https://<IP_LAN>:8443` -> Chọn **Advanced** -> Chọn **Proceed to unsafe** (chấp nhận chứng chỉ cho WebXR).
+3. **Kích hoạt chế độ thực tế ảo:** Bấm nút **START IMMERSIVE VR** trên giao diện chào mừng.
+4. **Căn chuẩn góc nhìn (Recenter - Bước bắt buộc để khóa thẳng trục):**
+   - Đứng ở vị trí mặt trước của bàn robot (mặt nhìn thẳng vuông góc vào robot theo trục $+X$).
+   - Giữ đầu nhìn thẳng song song với mặt bàn.
+   - **Nhấn và giữ nút Meta (nút dẹt có logo Meta trên tay cầm phải) trong 2 giây** cho đến khi vòng tròn căn chuẩn đóng lại.
+   - *Kết quả:* Kính Quest sẽ khóa trục nhìn $-Z_{quest}$ trùng khớp 100% với trục $+X_{robot}$ của bàn máy, loại bỏ hiện tượng bị quay lệch sang phải hay trái.
+
+#### 4.3. Bảng Chức Năng Các Phím Trên Tay Cầm Meta Quest 3S
+
+| Phím bấm | Ngón tay thao tác | Cơ chế điều khiển | Mô tả chi tiết hành vi |
+| :--- | :--- | :--- | :--- |
+| **Nhấn cần gạt Thumbstick (R3/L3)** | Ngón cái | **Về Vị Trí An Toàn (Go Home)** | **Nhấn 1 lần vào cần gạt Analog** (hoặc nhấn giữ nút B/Y trong 1 giây) để tự động đưa cánh tay robot về vị trí Home an toàn. Tay cầm rung xác nhận 2 nhịp, tự động mở khóa bảo vệ và tái kích hoạt Teleop khi về đích. |
+| **Nút B (Tay phải) / Y (Tay trái)** | Ngón cái | **Chuyển Chế Độ / Về Home** | - **Bấm nhanh (< 1s):** Chuyển đổi giữa **Edit Mode** (chỉnh UI Cockpit) và **Drive Mode** (lái robot).<br>- **Nhấn giữ (> 1s):** Kích hoạt lệnh **Go Home** đưa robot về vị trí an toàn. |
+| **Cò Trỏ (Index Trigger)** | Ngón trỏ | **Tịnh Tiến Không Gian (Arm-Plane)** | Bấm giữ cò và di chuyển tay trong không gian để tịnh tiến đầu robot (Tiến/Lùi dọc theo cánh tay, Trái/Phải quét vòng tròn, Lên/Xuống). Góc xoay cổ tay được khóa cố định. |
+| **Nút Hông (Hand Grip)** | Ngón giữa / ngón áp út | **Xoay Đầu Công Cụ (Tool-Centric)** | Bấm giữ nút hông và xoay cổ tay để điều chỉnh hướng chúc/ngửa/nghiêng của ngàm kẹp theo hệ trục của camera cổ tay. Tọa độ vị trí XYZ được giữ nguyên. |
+| **Nút A (Tay phải) / X (Tay trái)** | Ngón cái | **Bật / Tắt Ngàm Kẹp (Gripper)** | Nhấn để đóng ngàm kẹp gắp quả cà chua, nhấn lần nữa để mở ngàm thả vật thể vào giỏ. |
+| **Nút Meta (Oculus)** | Ngón cái (Tay phải) | **Căn Chuẩn Trục Nhìn (Recenter)** | Nhấn giữ 2 giây để đồng bộ lại hướng nhìn thẳng của kính với trục bàn robot. |
+
+#### 4.4. Cơ Chế Khóa Trục Thông Minh (Soft Axis Snapping)
+Nhằm triệt tiêu hiện tượng cánh tay người bị rung lắc hoặc uốn cong vô thức khi vươn tay trong không khí tự do, hệ thống tích hợp bộ lọc khóa trục thông minh:
+- **Khi đẩy thẳng (Tiến / Lùi theo trục X):** Khi phát hiện bạn đang chủ đích đưa tay ra trước hoặc kéo về sau, hệ thống tự động triệt tiêu các dao động lệch ngang ($\Delta Y \approx 0$). Cánh tay robot UR3e sẽ chuyển động thẳng tắp dọc theo trục bàn như đang trượt trên thanh ray cơ khí.
+- **Khi gạt ngang (Trái / Phải theo trục Y):** Chuyển động dọc trục X được nén phẳng, robot lướt ngang song song với mép bàn.
+- **Khi nâng hạ (Lên / Xuống theo trục Z):** Dao động trôi ngang mặt phẳng XY được nén phẳng, giúp robot nâng hoặc hạ quả cà chua thẳng đứng mà không va quẹt vào thành giỏ hay mặt bàn.
+- **Khi di chuyển chéo góc tự do:** Khi người điều khiển chủ ý đưa tay theo đường chéo (tỷ lệ giữa 2 trục lớn hơn 45%), hệ thống tự động mở khóa hoàn toàn để cho phép điều hướng tự do trong không gian 3 chiều.
+
+#### 4.5. Kỹ Thuật Ly Hợp Điều Khiển Tầm Xa (Smart Clutching)
+Khi cần điều khiển robot di chuyển quãng đường dài vượt quá tầm với tự nhiên của sải tay:
+1. Bấm giữ Cò trỏ và đưa tay về phía trước đến hết tầm với thoải mái.
+2. **Nhả Cò trỏ:** Cánh tay robot sẽ dừng lại và giữ nguyên vị trí hiện tại trên bàn.
+3. Rút tay cầm về gần ngực hoặc vị trí thoải mái nhất của cơ thể.
+4. **Bấm giữ lại Cò trỏ:** Hệ thống tự động neo mốc mới (Reset Anchor). Robot tiếp tục di chuyển tiến tới từ vị trí đang đứng một cách mượt mà, hoàn toàn không bị giật hay nhảy cóc tọa độ (Zero Teleport).
 
 ---
 
@@ -354,11 +392,11 @@ Hệ thống hỗ trợ cấu hình IP linh hoạt không cần chỉnh sửa co
 
 - **Cách 1: Sử dụng tham số dòng lệnh CLI (Khuyến nghị hàng đầu):**
   ```bash
-  python3 main.py --robot-ip 192.168.1.100
+  python3 main.py --robot-ip 10.42.0.242
   ```
 - **Cách 2: Sử dụng biến môi trường:**
   ```bash
-  export ROBOT_IP=192.168.1.100
+  export ROBOT_IP=10.42.0.242
   python3 main.py
   ```
 - **Cách 3: Cập nhật mặc định trong file mã nguồn:**
@@ -451,9 +489,9 @@ Kiểm tra toàn vẹn các episode: xác minh không có giá trị `NaN`/`Inf`
 | :--- | :--- | :--- |
 | **Tần số vòng lặp chính** | 20 Hz (`dt = 0.05`s) | Đồng bộ giữa WebXR, Viser, CuRobo và RTDE servoJ. |
 | **Tần số Camera Stream** | 20 FPS | Truyền phát luồng hình ảnh thời gian thực tới Viser và WebXR Cockpit. |
-| **ServoJ Lookahead Time** | `0.04` s | Nội suy chuyển động mượt mà, loại bỏ độ trễ và độ rơ giật. |
-| **ServoJ Gain** | `800` | Độ cứng bám quỹ đạo cao, giúp đầu robot bám sát vị trí tay người. |
-| **Vận tốc khớp tối đa (Rate Limiter)** | `2.0` rad/s | Kẹp gia tốc và vận tốc khớp để chống lỗi Protective Stop trên UR. |
+| **ServoJ Lookahead Time** | `0.12` s | Nội suy dự đoán đa chu kỳ chuẩn Universal Robots, triệt tiêu vi rung giật. |
+| **ServoJ Gain** | `250` | Độ cứng vị trí tối ưu trên robot vật lý, giúp chuyển động lướt êm ái không bị gắt cơ học. |
+| **Vận tốc khớp tối đa (Rate Limiter)** | `0.5` rad/s ($\approx 28.6^\circ$/s) | Scaled Vector Limiter co giãn đồng bộ cả 6 khớp, tạo tốc độ di chuyển đầm chắc chuẩn Manual Jog. |
 | **Ngưỡng phát hiện vặn xoắn khớp** | `1.5` rad | Chặn những bước nhảy đột ngột do đảo nghiệm IK gần điểm kỳ dị. |
 | **Giới hạn khớp khuỷu (elbow_joint)** | `[-2.80, 2.80]` rad | Cho phép gập sâu tự nhiên (~160 độ) khi hạ thấp gắp cà chua, CuRobo tự quản lý va chạm. |
 | **Giới hạn khớp cổ tay (wrist_1, wrist_2)** | `[-2π, 2π]` rad | Duy trì dải quay đầy đủ của URDF, loại bỏ triệt để hiện tượng đảo nhánh vặn xoắn. |
@@ -464,6 +502,7 @@ Kiểm tra toàn vẹn các episode: xác minh không có giá trị `NaN`/`Inf`
 | **Số hạt giống CuRobo IK** | 64 seeds | Nâng cao xác suất tìm nghiệm liên tục trên GPU. |
 | **Hệ số phạt lệch nhánh IK** | `50.0` (khi lệch $> 0.8$ rad) | Giữ robot luôn ở nhánh động học đồng nhất với vị trí hiện tại. |
 | **Deadband tĩnh tay cầm VR** | 5 mm (`0.005` m) | Loại bỏ rung tay sinh lý với cơ chế trừ mềm (Soft Deadband). |
-| **Độ lệch tay cầm tối đa (max_delta_m)** | 0.25 m | Phạm vi kéo tay mỗi nhịp bóp cò, tạo cảm giác thoải mái. |
-| **Bộ lọc làm mượt EMA (Alpha)** | 0.35 | Cân bằng giữa độ nhạy phản hồi và chống nhiễu jitter. |
+| **Tỷ lệ truyền chuyển động tay (scale)** | `0.6` | Tỷ lệ 60% giúp thao tác tinh chỉnh cực kỳ chính xác, tránh hiện tượng quá trớn. |
+| **Độ lệch tay cầm tối đa (max_delta_m)** | `0.18` m | Phạm vi kéo tay mỗi nhịp bóp cò, tạo cảm giác thoải mái. |
+| **Bộ lọc làm mượt EMA (Alpha)** | `0.25` | Chuyển động lướt êm ái, đầm chắc như cần gạt thủy lực. |
 | **Ngưỡng thời gian Auto-Snap** | 1.2 s | Tự động kéo XYZ về đầu tay máy và reset seed khi bị kẹt tư thế hoặc vướng vật cản. |

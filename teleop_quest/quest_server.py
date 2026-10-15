@@ -25,6 +25,7 @@ class QuestServer:
         self._clients = set()
         self._loop = None
         self._estop_triggered = False
+        self._home_requested = False
         self._latest_jpeg = None
         self._drive_mode = False
 
@@ -78,6 +79,13 @@ class QuestServer:
         with self._lock:
             if self._estop_triggered:
                 self._estop_triggered = False
+                return True
+            return False
+
+    def check_and_clear_home(self) -> bool:
+        with self._lock:
+            if self._home_requested:
+                self._home_requested = False
                 return True
             return False
 
@@ -235,9 +243,13 @@ class QuestServer:
                                 self._estop_triggered = True
                             elif data.get("type") == "ui_state":
                                 self._drive_mode = bool(data.get("drive_mode", False))
+                            elif data.get("type") == "go_home":
+                                self._home_requested = True
                             else:
                                 self._latest_frame = data
                                 self._last_seen = time.time()
+                                if data.get("home_btn"):
+                                    self._home_requested = True
                     except json.JSONDecodeError:
                         pass
             except (websockets.exceptions.ConnectionClosed, Exception):

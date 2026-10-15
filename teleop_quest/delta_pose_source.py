@@ -5,13 +5,14 @@ class DeltaPoseSource:
     Implements PoseSource contract.
     Chuyển delta tọa độ từ kính Quest sang base_link của UR3e.
     """
-    def __init__(self, server, ctrl, scale: float = 1.0, max_delta_m: float = 0.25, anchor_reference_func=None, alpha: float = 0.35):
+    def __init__(self, server, ctrl, scale: float = 0.6, max_delta_m: float = 0.18, anchor_reference_func=None, alpha: float = 0.25):
+        import os
         self.server = server
         self.ctrl = ctrl
-        self.scale = scale
-        self.max_delta_m = max_delta_m
+        self.scale = float(os.environ.get("TELEOP_SCALE", str(scale)))
+        self.max_delta_m = float(os.environ.get("MAX_DELTA_M", str(max_delta_m)))
         self.anchor_reference_func = anchor_reference_func
-        self.alpha = alpha
+        self.alpha = float(os.environ.get("TELEOP_ALPHA", str(alpha)))
         
         self._last_diag_msg = ""
         self._last_diag_time = 0
@@ -35,8 +36,63 @@ class DeltaPoseSource:
         self._ema_pos = None
         self._ema_quat_xyzw = None
         
+        import os
+        self.enable_axis_snapping = os.environ.get("AXIS_SNAPPING", "1") == "1"
+        self.nav_mode = os.environ.get("NAV_MODE", "arm_plane").lower()
+
         self._last_button_state = 0
         self.out_of_reach_time = 0.0
+
+    def _apply_soft_axis_snapping(self, delta_robot):
+        """
+        Khóa trục thông minh (Soft Axis Snapping):
+        Triệt tiêu rung lắc / lệch tay sinh trắc học khi người dùng chủ đích di chuyển theo một trục chính,
+        nhưng vẫn chuyển tiếp mềm mại (không giật) khi người dùng chủ đích đi chéo 2D/3D.
+        """
+        dx, dy, dz = delta_robot[0], delta_robot[1], delta_robot[2]
+        
+        # 1. Khóa trục mặt phẳng ngang (X - Tiến/Lùi vs Y - Trái/Phải):
+        abs_x = abs(dx)
+        abs_y = abs(dy)
+        
+        if abs_x > 0.005 or abs_y > 0.005:
+            if abs_x >= abs_y:
+                ratio = abs_y / (abs_x + 1e-6)
+                # Nếu tỷ lệ trôi ngang < 20%: Khóa hoàn toàn về 0
+                # Nếu 20% <= tỷ lệ <= 45%: Hòa trộn mượt (smooth blend)
+                # Nếu > 45%: Giữ nguyên cho phép đi chéo tự do
+                if ratio < 0.20:
+                    scale_y = 0.0
+                elif ratio < 0.45:
+                    scale_y = (ratio - 0.20) / (0.45 - 0.20)
+                else:
+                    scale_y = 1.0
+                dy = dy * scale_y
+            else:
+                ratio = abs_x / (abs_y + 1e-6)
+                if ratio < 0.20:
+                    scale_x = 0.0
+                elif ratio < 0.45:
+                    scale_x = (ratio - 0.20) / (0.45 - 0.20)
+                else:
+                    scale_x = 1.0
+                dx = dx * scale_x
+
+        # 2. Tách biệt mặt phẳng ngang (X, Y) và trục đứng (Z):
+        # Tránh trôi độ cao khi quét mặt phẳng, hoặc tránh trôi mặt phẳng khi nhấc thẳng lên/hạ thẳng xuống
+        d_xy = np.sqrt(dx * dx + dy * dy)
+        abs_z = abs(dz)
+        
+        if d_xy > 0.025 and abs_z < 0.012:
+            # Người dùng đang trượt phẳng trên mặt bàn: Nén rung lắc trục Z
+            dz = dz * (abs_z / 0.012)
+        elif abs_z > 0.025 and d_xy < 0.012:
+            # Người dùng đang nhấc/hạ thẳng đứng: Nén rung lắc mặt phẳng XY
+            factor = d_xy / 0.012
+            dx = dx * factor
+            dy = dy * factor
+
+        return np.array([dx, dy, dz])
 
     def get_pose(self):
         # Không sinh delta pose khi đang ở Edit Mode để tránh di chuyển ngoài ý muốn
@@ -137,16 +193,43 @@ class DeltaPoseSource:
                     
                 diag_msg = f"{direction_word}"
                         
-            # --- WORLD-CENTRIC MAPPING ---
-            # Ánh xạ trực tiếp Không gian tay người 1:1 sang Không gian Robot
-            # WebXR World: X(Phải), Y(Lên), Z(Lùi về phía sếp)
-            # Robot World: X(Tiến xa), Y(Trái), Z(Lên)
-            delta_robot_world = np.array([
-                -delta_q_world[2], # Robot X (Tiến) = Quest -Z
-                -delta_q_world[0], # Robot Y (Trái) = Quest -X
-                 delta_q_world[1]  # Robot Z (Lên)  = Quest Y
-            ])
-            
+            # Lấy các thành phần di chuyển từ tay người dùng (WebXR):
+            # - delta_q_world[2]: Lùi (+Z) / Tiến (-Z)
+            # - delta_q_world[0]: Sang phải (+X) / Sang trái (-X)
+            # - delta_q_world[1]: Lên (+Y) / Xuống (-Y)
+            d_forward = -delta_q_world[2]   # Tiến / Lùi
+            d_lateral =  delta_q_world[0]   # Phải / Trái
+            d_vertical = delta_q_world[1]   # Lên / Xuống
+
+            # Áp dụng Khóa trục thông minh (Soft Axis Snapping) trên cử động tay người
+            if self.enable_axis_snapping:
+                d_snapped = self._apply_soft_axis_snapping(np.array([d_forward, d_lateral, d_vertical]))
+                d_forward, d_lateral, d_vertical = d_snapped[0], d_snapped[1], d_snapped[2]
+
+            if self.nav_mode == "arm_plane" and self._anchor_tcp is not None:
+                # --- CHẾ ĐỘ MẶT PHẲNG CÁNH TAY (ARM-PLANE / CYLINDRICAL NAVIGATION) ---
+                # Hướng "Tiến" luôn là phương nối từ Chân đế (Base) ra Đầu công cụ (TCP).
+                # Khi chân đế xoay đi góc nào, hướng Tiến sẽ duỗi dài cánh tay ra xa chân đế theo góc đó.
+                x_anc = self._anchor_tcp[0]
+                y_anc = self._anchor_tcp[1]
+                r_anc = np.hypot(x_anc, y_anc)
+                theta_arm = np.arctan2(y_anc, x_anc) if r_anc > 0.03 else 0.0
+
+                # Vector đơn vị hướng tâm (duỗi ra xa chân đế): [cos(theta), sin(theta)]
+                # Vector đơn vị tiếp tuyến sang phải: [sin(theta), -cos(theta)]
+                dx_robot = d_forward * np.cos(theta_arm) + d_lateral * np.sin(theta_arm)
+                dy_robot = d_forward * np.sin(theta_arm) - d_lateral * np.cos(theta_arm)
+                dz_robot = d_vertical
+
+                delta_robot_world = np.array([dx_robot, dy_robot, dz_robot])
+            else:
+                # Chế độ Cartesian Base Link truyền thống (Trục X/Y cố định của bàn máy)
+                delta_robot_world = np.array([
+                    d_forward,
+                    -d_lateral,
+                    d_vertical
+                ])
+
             delta_robot_world = delta_robot_world * self.scale
             delta_robot_world = np.clip(delta_robot_world, -self.max_delta_m, self.max_delta_m)
         else:

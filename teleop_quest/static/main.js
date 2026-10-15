@@ -169,6 +169,44 @@
             setDriveMode(!uiLocked, true);
         });
 
+        const btnHomeVR = document.getElementById('btn-home-vr');
+        if (btnHomeVR) {
+            btnHomeVR.addEventListener('click', (e) => {
+                e.stopPropagation();
+                triggerGoHome(activeSource);
+            });
+        }
+
+        let lastThumbstickPressed = false;
+        let btnBPressStartTime = 0;
+        let btnBLongTriggered = false;
+        let lastHomeSentTime = 0;
+
+        function triggerGoHome(source) {
+            let now = Date.now();
+            if (now - lastHomeSentTime < 2000) return;
+            lastHomeSentTime = now;
+            console.log("[WebXR] Go Home command triggered from VR Controller!");
+            if (source && source.gamepad && source.gamepad.hapticActuators && source.gamepad.hapticActuators.length > 0) {
+                source.gamepad.hapticActuators[0].pulse(1.0, 300);
+                setTimeout(() => {
+                    if (source.gamepad.hapticActuators.length > 0) source.gamepad.hapticActuators[0].pulse(0.8, 200);
+                }, 350);
+            }
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'go_home' }));
+            }
+            let elHome = document.getElementById('val-home-btn');
+            if (elHome) {
+                elHome.innerText = "Returning Home...";
+                elHome.className = "badge green";
+                setTimeout(() => {
+                    elHome.innerText = "Thumbstick / Hold B";
+                    elHome.className = "badge gray";
+                }, 4000);
+            }
+        }
+
         btnEnterVR.addEventListener('click', () => {
             if (btnEnterVR.isVR) {
                 if (!xrSession) {
@@ -271,26 +309,59 @@
                     let gripPressed = false;
                     let gripperBtnPressed = false;
                     let driveTogglePressed = false;
+                    let thumbstickPressed = false;
                     
                     if (activeSource.gamepad && activeSource.gamepad.buttons) {
                         // Button 0: Index Trigger (bóp trỏ - tịnh tiến)
                         if (activeSource.gamepad.buttons.length > 0) triggerPressed = activeSource.gamepad.buttons[0].pressed;
                         // Button 1: Hand Grip (bóp hông - xoay)
                         if (activeSource.gamepad.buttons.length > 1) gripPressed = activeSource.gamepad.buttons[1].pressed;
+                        // Button 3: Thumbstick Click (nhấn cần gạt Analog) -> Lệnh Go Home
+                        if (activeSource.gamepad.buttons.length > 3) thumbstickPressed = activeSource.gamepad.buttons[3].pressed;
                         // Button 4: Nút A (tay phải) hoặc Nút X (tay trái) - Kẹp/Nhả Gripper
                         if (activeSource.gamepad.buttons.length > 4) gripperBtnPressed = activeSource.gamepad.buttons[4].pressed;
-                        // Button 5: Nút B (tay phải) hoặc Nút Y (tay trái) - Phím cứng chuyển đổi Drive Mode
+                        // Button 5: Nút B (tay phải) hoặc Nút Y (tay trái) - Phím cứng chuyển đổi Drive Mode hoặc Giữ để Go Home
                         if (activeSource.gamepad.buttons.length > 5) driveTogglePressed = activeSource.gamepad.buttons[5].pressed;
                     }
 
-                    // Xử lý sườn lên nút B/Y: bấm 1 lần để chuyển Drive Mode và rung nhẹ xác nhận
-                    if (driveTogglePressed && !lastDriveTogglePressed) {
-                        setDriveMode(!uiLocked, true);
-                        if (activeSource.gamepad && activeSource.gamepad.hapticActuators && activeSource.gamepad.hapticActuators.length > 0) {
-                            activeSource.gamepad.hapticActuators[0].pulse(0.7, 120);
+                    // 1. Xử lý Thumbstick Click (nhấn cần gạt analog R3): Kích hoạt Go Home tức thì
+                    if (thumbstickPressed && !lastThumbstickPressed) {
+                        triggerGoHome(activeSource);
+                    }
+                    lastThumbstickPressed = thumbstickPressed;
+
+                    // 2. Xử lý nút B / Y:
+                    // - Bấm nhả nhanh (< 1 giây): Bật / Tắt Drive Mode
+                    // - Nhấn giữ lâu (> 1 giây): Kích hoạt Go Home
+                    if (driveTogglePressed) {
+                        if (btnBPressStartTime === 0) {
+                            btnBPressStartTime = Date.now();
+                            btnBLongTriggered = false;
+                        } else if (Date.now() - btnBPressStartTime > 1000 && !btnBLongTriggered) {
+                            btnBLongTriggered = true;
+                            triggerGoHome(activeSource);
+                        }
+                    } else {
+                        if (btnBPressStartTime > 0) {
+                            if (!btnBLongTriggered) {
+                                setDriveMode(!uiLocked, true);
+                                if (activeSource.gamepad && activeSource.gamepad.hapticActuators && activeSource.gamepad.hapticActuators.length > 0) {
+                                    activeSource.gamepad.hapticActuators[0].pulse(0.7, 120);
+                                }
+                            }
+                            btnBPressStartTime = 0;
+                            btnBLongTriggered = false;
                         }
                     }
-                    lastDriveTogglePressed = driveTogglePressed;
+
+                    // 3. Kiểm tra cả tay cầm phụ nếu có (ví dụ tay trái nhấn cần gạt L3)
+                    for (let s of session.inputSources) {
+                        if (s !== activeSource && s.gamepad && s.gamepad.buttons) {
+                            if (s.gamepad.buttons.length > 3 && s.gamepad.buttons[3].pressed) {
+                                triggerGoHome(s);
+                            }
+                        }
+                    }
 
                     let pos = pose.transform.position;
                     let quat = pose.transform.orientation;

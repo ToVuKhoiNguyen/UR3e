@@ -2,7 +2,7 @@ import numpy as np
 
 class WidgetPoseSource:
     """Nguồn cấp tọa độ cho Controller (Đọc từ Widget)"""
-    def __init__(self, target_widget, alpha=0.85):
+    def __init__(self, target_widget, alpha=0.55):
         self.target_widget = target_widget
         self.alpha = alpha
         self._ema_pos = None

@@ -77,6 +77,15 @@ def main():
     logger = DataLogger(config)
     guard = SingularityGuard(config)
 
+    # Kiểm tra trạng thái kỳ dị ban đầu của robot
+    try:
+        init_m = guard.metrics_calc.get_metrics(torch.tensor([start_joints], device=guard.metrics_calc.device))
+        init_sigma = init_m["sigma_min"].item()
+        if init_sigma < guard.danger_threshold:
+            print(f"[Cảnh báo] Robot đang ở thế kỳ dị (sigma={init_sigma:.3f} < {guard.danger_threshold:.3f}). Hãy đưa robot về Home hoặc chỉnh khớp qua PolyScope.")
+    except Exception:
+        pass
+
     # 3. Tính toán vị trí ban đầu của robot qua CuRobo FK (chuẩn Viser world)
     curobo_solver = CuRoboIKSolver(ctrl.ik_solver)
     fk_init = curobo_solver.fk(start_joints)
@@ -101,9 +110,56 @@ def main():
     grasp_sim = GraspSimulator(ui.server, pick_pos=pick_pos, place_pos=place_pos)
     wrist_cam = create_wrist_camera(camera_type=args.camera, device_index=args.camera_device, width=640, height=480)
 
+    # Khởi tạo luồng nền độc lập cho Camera Stream & Preview (Loại bỏ jitter 15-30ms cho vòng lặp RTDE 20Hz)
+    camera_state = {
+        "tool_pos": robot_init_pos,
+        "tool_quat": robot_init_quat,
+        "tomato_pos": grasp_sim.tomato_pos,
+        "basket_pos": grasp_sim.place_basket_pos,
+        "gripper_closed": False,
+        "latest_raw_frame": None,
+        "latest_preview_frame": None,
+        "running": True,
+    }
+    camera_lock = threading.Lock()
+
+    def camera_worker():
+        while camera_state["running"]:
+            t_cam_start = time.perf_counter()
+            with camera_lock:
+                pos = camera_state["tool_pos"]
+                quat = camera_state["tool_quat"]
+                tom_pos = camera_state["tomato_pos"]
+                b_pos = camera_state["basket_pos"]
+                grp = camera_state["gripper_closed"]
+
+            try:
+                raw_frame = wrist_cam.get_frame(
+                    tool_pos=pos,
+                    tool_quat=quat,
+                    tomato_pos=tom_pos,
+                    basket_pos=b_pos,
+                    gripper_closed=grp
+                )
+                preview_frame = wrist_cam.add_osd_preview(raw_frame, grp)
+                with camera_lock:
+                    camera_state["latest_raw_frame"] = raw_frame
+                    camera_state["latest_preview_frame"] = preview_frame
+
+                ui.update_cam_preview(preview_frame)
+                quest_server.send_camera_frame(preview_frame)
+            except Exception:
+                pass
+
+            dur = time.perf_counter() - t_cam_start
+            time.sleep(max(0.005, 0.05 - dur))
+
+    cam_thread = threading.Thread(target=camera_worker, daemon=True)
+    cam_thread.start()
+
     # 4. Thiết lập nguồn tọa độ VR & Pipeline Teleop
     widget_pose_source = WidgetPoseSource(ui.target_widget)
-    executor = ServoJExecutor(dt=POLL_SLEEP)
+    executor = ServoJExecutor(dt=POLL_SLEEP, lookahead_time=0.12, gain=250)
     teleop = TeleoperationController(
         pose_source=widget_pose_source,
         curobo_solver=curobo_solver,
@@ -112,10 +168,10 @@ def main():
     )
 
     pose_source = DeltaPoseSource(
-        quest_server, ctrl, scale=1.0,
+        quest_server, ctrl, scale=0.6,
         anchor_reference_func=lambda: get_robot_fk_as_ur(teleop, ctrl),
-        alpha=0.35,
-        max_delta_m=0.25
+        alpha=0.25,
+        max_delta_m=0.18
     )
 
     # 5. Khởi tạo bộ giám sát mất kết nối & Home Planner
@@ -184,6 +240,7 @@ def main():
     # Xử lý tín hiệu tắt an toàn
     def handle_sigint(sig, frame):
         print("\n[Hệ thống] Đang tắt an toàn...")
+        camera_state["running"] = False
         teleop.enabled = False
         time.sleep(0.5)
         ctrl.close()
@@ -231,6 +288,25 @@ def main():
                 pass
             ui.set_status("EMERGENCY STOP (Từ VR)!")
             quest_server.send_haptic(1.0, 1000)
+
+        # A1. Kiểm tra lệnh Go Home từ tay cầm VR (Nhấn Thumbstick hoặc Giữ phím B)
+        if quest_server.check_and_clear_home():
+            if not is_navigating_home.is_set():
+                print("[Quest] Nhận lệnh Go Home từ tay cầm VR! Bắt đầu đưa robot về Home an toàn...")
+                ui.set_status("Returning Home (Từ VR)...")
+                quest_server.send_haptic(1.0, 300)
+                threading.Thread(
+                    target=home_planner.go_home,
+                    args=(
+                        teleop, executor, ctrl, ui.target_widget,
+                        widget_pose_source, ui.ui_status, ui.cb_teleop
+                    ),
+                    kwargs={
+                        "is_navigating_home": is_navigating_home,
+                        "poll_sleep": POLL_SLEEP
+                    },
+                    daemon=True
+                ).start()
 
         # B. Cập nhật trạng thái kết nối
         ui.set_connected(quest_server.is_connected())
@@ -333,7 +409,10 @@ def main():
                     teleop._last_valid_q = list(q_real)
                     ui.set_status("Tự động thu hồi XYZ")
                     quest_server.send_haptic(intensity=1.0, duration=200)
-                    print(f"[Auto-Snap] Lỗi vặn xoắn / vướng vật cản ({current_status}) -> Tự động thu hồi XYZ về đầu tay máy!")
+                    
+                    if not hasattr(main, "_last_snap_log_time") or time.time() - main._last_snap_log_time > 3.0:
+                        main._last_snap_log_time = time.time()
+                        print(f"[Auto-Snap] Dừng: {current_status}")
 
                 # Cập nhật logic gắp thả vật thể 3D (Cà chua): Độc lập nút Gripper (nút A/X) với Clutch xoay (Grip)
                 vr_frame = quest_server.get_frame()
@@ -353,6 +432,8 @@ def main():
                 # Ghi dữ liệu HDF5 phục vụ huấn luyện AI
                 if logger.is_recording:
                     q_target_cmd = teleop._last_valid_q if teleop._last_valid_q is not None else q_real
+                    with camera_lock:
+                        logged_img = camera_state["latest_raw_frame"]
                     logger.log_step(
                         q_actual=q_real,
                         qd_actual=ctrl.rr.getActualQd(),
@@ -360,7 +441,7 @@ def main():
                         q_target=q_target_cmd,
                         gripper_actual=grip_val,
                         gripper_target=grip_val,
-                        images={"wrist_camera": cam_img if 'cam_img' in locals() else None},
+                        images={"wrist_camera": logged_img},
                     )
 
             except Exception as e:
@@ -372,25 +453,19 @@ def main():
             if not curr_st.startswith("Lỗi") and not curr_st.startswith("EMERGENCY") and not "Error" in curr_st:
                 ui.set_status("Tắt")
 
-        # E. Cập nhật giao diện 3D và Luồng Camera trực tiếp (Luôn chạy bất kể Teleop bật hay tắt)
+        # E. Cập nhật giao diện 3D và chia sẻ trạng thái cho luồng Camera nền
         if fk_res is not None:
-            # Đồng bộ dáng robot thực tế lên Viser 3D
+            # Đồng bộ dáng robot thực tế lên Viser 3D (nhẹ, chỉ gửi 1 gói websocket cập nhật góc khớp)
             ui.update_robot_state(q_real)
 
-            # Render luồng trực tiếp từ Camera cổ tay (Mô phỏng 3D hoặc Camera thật) thời gian thực ở 20 FPS
+            # Cập nhật trạng thái mới nhất cho luồng camera_worker chạy ngầm độc lập
             current_grip = is_grip_pressed if teleop.enabled else bool(ui.cb_gripper.value)
-            cam_img = wrist_cam.get_frame(
-                tool_pos=fk_res["pos"],
-                tool_quat=fk_res["quat"],
-                tomato_pos=grasp_sim.tomato_pos,
-                basket_pos=grasp_sim.place_basket_pos,
-                gripper_closed=current_grip
-            )
-            preview_frame = wrist_cam.add_osd_preview(cam_img, current_grip)
-            # 1. Cập nhật khung xem trước trên sidebar Viser
-            ui.update_cam_preview(preview_frame)
-            # 2. Phát luồng trực tiếp sang khung CAMERA STREAM trên VR Dashboard và MJPEG
-            quest_server.send_camera_frame(preview_frame)
+            with camera_lock:
+                camera_state["tool_pos"] = fk_res["pos"]
+                camera_state["tool_quat"] = fk_res["quat"]
+                camera_state["tomato_pos"] = grasp_sim.tomato_pos
+                camera_state["basket_pos"] = grasp_sim.place_basket_pos
+                camera_state["gripper_closed"] = current_grip
 
         # Bù trừ thời gian trễ thực tế để duy trì chính xác tần số 20Hz (50ms/bước)
         elapsed = time.perf_counter() - loop_start_time

@@ -89,10 +89,10 @@ class SafetyGate:
 class ServoJExecutor:
     ROBOT_IP = os.environ.get("ROBOT_IP", "127.0.0.1")
 
-    def __init__(self, dt=0.05, lookahead_time=0.04, gain=800):
+    def __init__(self, dt=0.05, lookahead_time=0.12, gain=250):
         self._dt = dt
-        self._lookahead = lookahead_time
-        self._gain = gain
+        self._lookahead = float(os.environ.get("SERVO_LOOKAHEAD", str(lookahead_time)))
+        self._gain = int(os.environ.get("SERVO_GAIN", str(gain)))
         self._ctrl = None
 
     def connect(self):
@@ -136,7 +136,9 @@ class ServoJExecutor:
                     print(f"[ServoJ] Không thể kết nối RTDE Control: {inner_e}")
                     self._ctrl = None
             else:
-                print(f"[ServoJ] Lỗi kết nối RTDE Control: {e}")
+                print(f"[ServoJ] Lỗi kết nối RTDE: {e}")
+                if "remote control" in err_msg:
+                    print("[Gợi ý] Hãy bật Remote Control trên PolyScope (góc trên phải màn hình Teach Pendant).")
                 self._ctrl = None
 
     def disconnect(self):
@@ -267,16 +269,16 @@ class TeleoperationController:
                         self._status = "Tư thế kẹt (Lỗi vặn xoắn khớp) - Dừng im"
                     return
                 
-                # Rate Limiter: Kẹp (clamp) vận tốc khớp tối đa để bảo vệ động cơ thực
-                # Mặc định 0.8 rad/s (~46 độ/s) an toàn tuyệt đối cho test thực tế (cho phép ghi đè qua MAX_JOINT_VEL)
-                MAX_VEL = float(os.environ.get("MAX_JOINT_VEL", "0.8"))
+                # Scaled Vector Rate Limiter: Co giãn đồng thời cả 6 khớp theo cùng một tỷ lệ
+                # để bảo toàn 100% hướng vector chuyển động trong không gian Descartes (không làm méo lệch quỹ đạo)
+                # Mặc định 0.5 rad/s (~28.6 độ/s) cho chuyển động đầm chắc, êm dịu chuẩn manual jog
+                MAX_VEL = float(os.environ.get("MAX_JOINT_VEL", "0.5"))
                 DT = self._dt
                 max_dq = MAX_VEL * DT
-                for i in range(6):
-                    if q_target[i] - self._last_valid_q[i] > max_dq:
-                        q_target[i] = self._last_valid_q[i] + max_dq
-                    elif q_target[i] - self._last_valid_q[i] < -max_dq:
-                        q_target[i] = self._last_valid_q[i] - max_dq
+                dq = [q_target[i] - self._last_valid_q[i] for i in range(6)]
+                max_ratio = max(abs(dq[i]) / max_dq for i in range(6))
+                if max_ratio > 1.0:
+                    q_target = [self._last_valid_q[i] + dq[i] / max_ratio for i in range(6)]
         else:
             # Phân tách chính xác nguyên nhân không tìm được nghiệm IK
             pos = pose["pos"]
