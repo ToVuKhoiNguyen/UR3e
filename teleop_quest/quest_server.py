@@ -176,6 +176,9 @@ class QuestServer:
 
             def do_GET(self):
                 req_path = self.path.split("?")[0]
+                client_ip = self.client_address[0] if self.client_address else "unknown"
+                if req_path in ("/", "/index.html"):
+                    print(f"[WebXR HTTPS] Thiết bị ({client_ip}) ĐÃ KẾT NỐI thành công vào trang WebXR Cockpit!")
                 # 1. Luồng video MJPEG liên tục thời gian thực (Native Realtime Stream)
                 if req_path in ("/video_feed", "/stream.mjpg", "/wrist_camera_stream"):
                     self.send_response(200)
@@ -249,7 +252,7 @@ class QuestServer:
 
         async def handler(websocket):
             remote_ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
-            print(f"[Quest] WebSocket connected from {remote_ip}")
+            print(f"[WebXR WebSocket] KÍNH QUEST ĐÃ KẾT NỐI ĐIỀU KHIỂN THÀNH CÔNG từ {remote_ip}!")
             with self._lock:
                 self._connected = True
                 self._clients.add(websocket)
@@ -277,7 +280,7 @@ class QuestServer:
             except (websockets.exceptions.ConnectionClosed, Exception):
                 pass
             finally:
-                print(f"[Quest] WebSocket disconnected from {remote_ip}")
+                print(f"[WebXR WebSocket] Kính Quest đã ngắt kết nối điều khiển từ {remote_ip}")
                 with self._lock:
                     self._clients.discard(websocket)
                     if not self._clients:

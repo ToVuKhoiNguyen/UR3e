@@ -16,6 +16,7 @@ import signal
 import yaml
 import traceback
 import threading
+import subprocess
 import numpy as np
 import torch
 
@@ -44,6 +45,47 @@ def load_config():
     with open(cfg_path, 'r') as f:
         return yaml.safe_load(f)
 
+def auto_setup_quest_adb():
+    """Tự động kiểm tra và chuyển tiếp cổng ADB nền liên tục nếu kính Quest cắm cáp USB"""
+    script_path = os.path.join(os.path.dirname(__file__), "setup_quest_adb.sh")
+    if not os.path.exists(script_path):
+        return
+
+    def _adb_watcher():
+        last_status = None
+        while True:
+            try:
+                res = subprocess.run(["adb", "devices"], capture_output=True, text=True, timeout=2)
+                out = res.stdout
+                is_device = "\tdevice" in out
+                is_unauth = "\tunauthorized" in out
+
+                if is_device:
+                    if last_status != "authorized":
+                        res_setup = subprocess.run(["bash", script_path], capture_output=True, text=True, timeout=5)
+                        if res_setup.returncode == 0:
+                            print("\n" + "=" * 55)
+                            print("[ADB USB] ĐÃ KẾT NỐI VÀ CHUYỂN TIẾP CỔNG THÀNH CÔNG!")
+                            print("-> Hãy mở Meta Quest Browser trên kính và truy cập:")
+                            print("   https://localhost:8443")
+                            print("=" * 55 + "\n")
+                            last_status = "authorized"
+                elif is_unauth:
+                    if last_status != "unauthorized":
+                        print("\n[ADB CẢNH BÁO] Kính Quest đã cắm USB nhưng CHƯA CẤP QUYỀN (unauthorized)!")
+                        print("-> Hãy đeo kính Meta Quest lên mắt.")
+                        print("-> Bấm 'Allow USB Debugging' (Cho phép gỡ lỗi USB) trên màn hình kính!")
+                        last_status = "unauthorized"
+                else:
+                    if last_status not in (None, "disconnected"):
+                        last_status = "disconnected"
+            except Exception:
+                pass
+            time.sleep(2.5)
+
+    watcher_thread = threading.Thread(target=_adb_watcher, daemon=True)
+    watcher_thread.start()
+
 def main():
     print("=" * 60)
     print(" KHỞI ĐỘNG HỆ THỐNG VR TELEOP (META QUEST 3S) ")
@@ -63,6 +105,7 @@ def main():
     cert_path, key_path = setup_ssl(base_dir, local_ip)
     quest_server = QuestServer(cert_path, key_path)
     quest_server.start()
+    auto_setup_quest_adb()
 
 
     # 2. Khởi động Controller Robot, An toàn & Data Logger
@@ -256,7 +299,8 @@ def main():
     print("\n" + "=" * 40)
     print(f"IP MÁY CHỦ: {local_ip}")
     print(f"-> Viser Dashboard: http://localhost:8080")
-    print(f"-> VR WebXR: https://{local_ip}:{quest_server.http_port}")
+    print(f"-> VR WebXR (Wi-Fi): https://{local_ip}:{quest_server.http_port}")
+    print(f"-> VR WebXR (Cáp USB): https://localhost:{quest_server.http_port}")
     print("=" * 40 + "\n")
 
     _last_teleop_state = False

@@ -24,6 +24,7 @@ class DeltaPoseSource:
         self._anchor_quat_quest_xyzw = None
         self._anchor_tcp = None
         self._anchor_quat_robot_xyzw = None
+        self._anchor_theta_arm = None
         
         self._ema_pos = None
         self._ema_quat_xyzw = None
@@ -140,6 +141,16 @@ class DeltaPoseSource:
             else:
                 self._anchor_quat_robot_xyzw = np.array([0., 0., 0., 1.])
             
+            # Lấy góc quay của mặt phẳng cánh tay cơ học (khớp đế q0)
+            try:
+                joints = self.ctrl.joints()
+                if joints is not None and len(joints) > 0:
+                    self._anchor_theta_arm = float(joints[0])
+                else:
+                    self._anchor_theta_arm = None
+            except Exception:
+                self._anchor_theta_arm = None
+            
             self._ema_pos = None
             self._ema_quat_xyzw = None
             self._last_button_state = current_button_state
@@ -196,15 +207,17 @@ class DeltaPoseSource:
                 d_forward, d_lateral, d_vertical = d_snapped[0], d_snapped[1], d_snapped[2]
 
             if self.nav_mode == "arm_plane" and self._anchor_tcp is not None:
-                # --- CHẾ ĐỘ MẶT PHẲNG CÁNH TAY (ARM-PLANE / CYLINDRICAL NAVIGATION) ---
-                # Hướng "Tiến" luôn là phương nối từ Chân đế (Base) ra Đầu công cụ (TCP).
-                # Khi chân đế xoay đi góc nào, hướng Tiến sẽ duỗi dài cánh tay ra xa chân đế theo góc đó.
-                x_anc = self._anchor_tcp[0]
-                y_anc = self._anchor_tcp[1]
-                r_anc = np.hypot(x_anc, y_anc)
-                theta_arm = np.arctan2(y_anc, x_anc) if r_anc > 0.03 else 0.0
+                # --- CHẾ ĐỘ MẶT PHẲNG CÁNH TAY CƠ HỌC CHUẨN (TRUE MECHANICAL ARM PLANE) ---
+                # Hướng "Tiến" là phương gập duỗi tự nhiên của bắp tay (trùng khớp với góc quay khớp đế q0).
+                # Triệt tiêu hoàn toàn góc lệch cơ khí vai (13.1cm), giúp khớp đế q0 đứng im khi thu/duỗi tay thẳng.
+                theta_arm = self._anchor_theta_arm
+                if theta_arm is None:
+                    x_anc = self._anchor_tcp[0]
+                    y_anc = self._anchor_tcp[1]
+                    r_anc = np.hypot(x_anc, y_anc)
+                    theta_arm = np.arctan2(y_anc, x_anc) if r_anc > 0.03 else 0.0
 
-                # Vector đơn vị hướng tâm (duỗi ra xa chân đế): [cos(theta), sin(theta)]
+                # Vector đơn vị hướng duỗi cánh tay (dọc theo mặt phẳng gập khớp vai & khuỷu): [cos(theta), sin(theta)]
                 # Vector đơn vị tiếp tuyến sang phải: [sin(theta), -cos(theta)]
                 dx_robot = d_forward * np.cos(theta_arm) + d_lateral * np.sin(theta_arm)
                 dy_robot = d_forward * np.sin(theta_arm) - d_lateral * np.cos(theta_arm)
@@ -325,6 +338,7 @@ class DeltaPoseSource:
         self._anchor_quat_quest_xyzw = None
         self._anchor_tcp = None
         self._anchor_quat_robot_xyzw = None
+        self._anchor_theta_arm = None
         self._ema_pos = None
         self._ema_quat_xyzw = None
         self.out_of_reach_time = 0.0
