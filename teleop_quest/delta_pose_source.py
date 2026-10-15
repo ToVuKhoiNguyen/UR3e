@@ -86,6 +86,39 @@ class DeltaPoseSource:
 
         return np.array([dx, dy, dz])
 
+    def _apply_soft_rotation_snapping(self, rotvec_tcp):
+        """
+        Khóa trục xoay thông minh (Soft Rotation Snapping):
+        Triệt tiêu rung lắc / liên kết chéo vô thức giữa các trục xoay cổ tay.
+        Khi người dùng chủ ý xoay một trục chính (ví dụ Vặn ngàm gắp Roll, hoặc Gập cổ tay Pitch),
+        các trục phụ bị triệt tiêu về 0 để tránh vặn xoắn đa trục ngoài ý muốn.
+        Khi người dùng chủ ý bẻ chéo góc lớn (> 40%), hệ thống tự động hòa trộn mượt mở khóa xoay 3D tự do.
+        """
+        abs_v = np.abs(rotvec_tcp)
+        max_idx = int(np.argmax(abs_v))
+        max_val = abs_v[max_idx]
+
+        if max_val < 0.02:  # Dưới ~1.1 độ coi như không xoay
+            return rotvec_tcp
+
+        snapped = np.copy(rotvec_tcp)
+        for i in range(3):
+            if i == max_idx:
+                continue
+            ratio = abs_v[i] / (max_val + 1e-6)
+            # Nếu tỷ lệ xoay phụ < 25%: Khóa hoàn toàn về 0
+            # Nếu 25% <= tỷ lệ <= 40%: Hòa trộn mượt (smooth transition)
+            # Nếu > 40%: Giữ nguyên cho phép xoay 3D tự do
+            if ratio < 0.25:
+                snapped[i] = 0.0
+            elif ratio < 0.40:
+                scale = (ratio - 0.25) / (0.40 - 0.25)
+                snapped[i] = snapped[i] * scale
+            else:
+                snapped[i] = rotvec_tcp[i]
+
+        return snapped
+
     def get_pose(self):
         # Không sinh delta pose khi đang ở Edit Mode để tránh di chuyển ngoài ý muốn
         if hasattr(self.server, "get_drive_mode") and not self.server.get_drive_mode():
@@ -290,7 +323,22 @@ class DeltaPoseSource:
             ])
             rotvec_hand = R_delta_hand_local.as_rotvec()
             rotvec_tcp = M_local_q2tcp.dot(rotvec_hand)
+
+            # Áp dụng Khóa trục xoay thông minh (Soft Rotation Snapping)
+            if self.enable_axis_snapping:
+                rotvec_tcp = self._apply_soft_rotation_snapping(rotvec_tcp)
+
             R_delta_tcp_local = R.from_rotvec(rotvec_tcp)
+
+            if not is_translating:
+                abs_v = np.abs(rotvec_tcp)
+                max_idx = int(np.argmax(abs_v))
+                max_deg = np.degrees(abs_v[max_idx])
+                axis_names = ["GẬP/CHÚC (Pitch)", "LẮC NGANG (Yaw)", "VẶN GẮP (Roll)"]
+                if max_deg > 2.0:
+                    diag_msg = f"XOAY {axis_names[max_idx]} ({max_deg:.1f}°)"
+                else:
+                    diag_msg = "GIỮ HƯỚNG CŨ"
         else:
             R_delta_tcp_local = R.identity()
             

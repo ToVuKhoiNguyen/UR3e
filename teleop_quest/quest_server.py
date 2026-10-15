@@ -26,8 +26,11 @@ class QuestServer:
         self._loop = None
         self._estop_triggered = False
         self._home_requested = False
+        self._gripper_toggle_requested = False
         self._latest_jpeg = None
         self._drive_mode = False
+        self._latest_telemetry_bytes = None
+        self._latest_telemetry_dict = None
 
         self.static_dir = os.path.join(os.path.dirname(__file__), "static")
         self._cam_file = os.path.join(self.static_dir, "wrist_camera.jpg")
@@ -65,6 +68,9 @@ class QuestServer:
         """Cập nhật trạng thái Drive Mode từ hệ thống và đồng bộ sang kính Quest."""
         with self._lock:
             self._drive_mode = bool(enabled)
+            if self._latest_telemetry_dict is not None and "controller" in self._latest_telemetry_dict:
+                self._latest_telemetry_dict["controller"]["drive_mode"] = bool(enabled)
+                self._latest_telemetry_bytes = json.dumps(self._latest_telemetry_dict).encode("utf-8")
             clients = list(self._clients)
             loop = self._loop
         if clients and loop:
@@ -89,6 +95,13 @@ class QuestServer:
                 return True
             return False
 
+    def check_and_clear_gripper_toggle(self) -> bool:
+        with self._lock:
+            if self._gripper_toggle_requested:
+                self._gripper_toggle_requested = False
+                return True
+            return False
+
     def send_haptic(self, intensity: float = 1.0, duration: float = 100):
         with self._lock:
             clients = list(self._clients)
@@ -102,21 +115,51 @@ class QuestServer:
                     pass
 
     def broadcast_robot_telemetry(self, pos, quat, status: str = "OK", gripper: bool = False, joints: list = None):
-        """Phát tọa độ TCP thực tế, quaternion và trạng thái robot tới WebXR Cockpit HUD."""
+        """Phát tọa độ TCP thực tế, quaternion và trạng thái robot + VR controller tới WebXR Cockpit HUD."""
         with self._lock:
             clients = list(self._clients)
             loop = self._loop
+            latest_frame = dict(self._latest_frame) if self._latest_frame else None
+            now = time.time()
+            is_vr_connected = bool(self._connected and (now - self._last_seen < 3.0))
+            drive_mode = self._drive_mode
+
+        hand_name = "Waiting..."
+        trigger_pressed = False
+        grip_pressed = False
+        if is_vr_connected and latest_frame:
+            raw_hand = latest_frame.get("hand", "right")
+            hand_name = "Right Hand" if raw_hand == "right" else ("Left Hand" if raw_hand == "left" else str(raw_hand))
+            trigger_pressed = bool(latest_frame.get("trigger", False))
+            grip_pressed = bool(latest_frame.get("grip", False))
+
+        controller_info = {
+            "connected": is_vr_connected,
+            "hand": hand_name,
+            "trigger": trigger_pressed,
+            "grip": grip_pressed,
+            "gripper_btn": bool(gripper),
+            "drive_mode": bool(drive_mode)
+        }
+
+        msg_dict = {
+            "type": "robot_telemetry",
+            "pos": [round(float(p), 4) for p in pos] if pos is not None else [0.0, 0.0, 0.0],
+            "quat": [round(float(q), 4) for q in quat] if quat is not None else [1.0, 0.0, 0.0, 0.0],
+            "status": str(status),
+            "gripper": bool(gripper),
+            "controller": controller_info
+        }
+        if joints is not None:
+            msg_dict["joints"] = [round(float(j), 3) for j in joints]
+
+        msg_bytes = json.dumps(msg_dict).encode("utf-8")
+        with self._lock:
+            self._latest_telemetry_bytes = msg_bytes
+            self._latest_telemetry_dict = msg_dict
+
         if clients and loop:
-            msg_dict = {
-                "type": "robot_telemetry",
-                "pos": [round(float(p), 4) for p in pos] if pos is not None else [0.0, 0.0, 0.0],
-                "quat": [round(float(q), 4) for q in quat] if quat is not None else [1.0, 0.0, 0.0, 0.0],
-                "status": str(status),
-                "gripper": bool(gripper)
-            }
-            if joints is not None:
-                msg_dict["joints"] = [round(float(j), 3) for j in joints]
-            msg = json.dumps(msg_dict)
+            msg = msg_bytes.decode("utf-8")
             for ws in clients:
                 try:
                     asyncio.run_coroutine_threadsafe(ws.send(msg), loop)
@@ -174,6 +217,12 @@ class QuestServer:
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=static_dir, **kwargs)
 
+            def end_headers(self):
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+                super().end_headers()
+
             def do_GET(self):
                 req_path = self.path.split("?")[0]
                 client_ip = self.client_address[0] if self.client_address else "unknown"
@@ -225,6 +274,71 @@ class QuestServer:
                         self.send_response(404)
                         self.end_headers()
                         return
+
+                # 3. Telemetry JSON thời gian thực (hỗ trợ HTTP polling 10Hz-20Hz cho màn hình PC)
+                if req_path in ("/telemetry.json", "/telemetry"):
+                    with server_self._lock:
+                        t_bytes = server_self._latest_telemetry_bytes
+                    if not t_bytes:
+                        default_dict = {
+                            "type": "robot_telemetry",
+                            "pos": [0.0, 0.0, 0.0],
+                            "quat": [1.0, 0.0, 0.0, 0.0],
+                            "status": "Waiting...",
+                            "gripper": False,
+                            "controller": {
+                                "connected": False,
+                                "hand": "Waiting...",
+                                "trigger": False,
+                                "grip": False,
+                                "gripper_btn": False,
+                                "drive_mode": False
+                            }
+                        }
+                        t_bytes = json.dumps(default_dict).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(t_bytes)))
+                    self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                    self.send_header("Pragma", "no-cache")
+                    self.send_header("Expires", "0")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(t_bytes)
+                    return
+
+                # 4. REST Endpoints hỗ trợ điều khiển khi WebSocket bị giới hạn
+                if req_path == "/api/go_home":
+                    with server_self._lock:
+                        server_self._home_requested = True
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(b'{"status": "ok"}')
+                    return
+
+                if req_path == "/api/toggle_gripper":
+                    with server_self._lock:
+                        server_self._gripper_toggle_requested = True
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(b'{"status": "ok"}')
+                    return
+
+                if req_path == "/api/drive_mode":
+                    query_str = self.path.split("?")[1] if "?" in self.path else ""
+                    is_drive = "state=true" in query_str.lower()
+                    server_self.set_drive_mode(is_drive)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(b'{"status": "ok"}')
+                    return
+
                 super().do_GET()
 
             def log_message(self, format, *args):
@@ -270,11 +384,29 @@ class QuestServer:
                                 self._drive_mode = bool(data.get("drive_mode", False))
                             elif data.get("type") == "go_home":
                                 self._home_requested = True
+                            elif data.get("type") == "toggle_gripper":
+                                self._gripper_toggle_requested = True
                             else:
                                 self._latest_frame = data
                                 self._last_seen = time.time()
+                                self._connected = True
                                 if data.get("home_btn"):
                                     self._home_requested = True
+                                if data.get("gripper_toggle_btn"):
+                                    self._gripper_toggle_requested = True
+                                # Đồng bộ tức thời trạng thái tay cầm vào telemetry cache để HTTP polling cập nhật nhạy
+                                if self._latest_telemetry_dict is not None:
+                                    raw_h = data.get("hand", "right")
+                                    h_str = "Right Hand" if raw_h == "right" else ("Left Hand" if raw_h == "left" else str(raw_h))
+                                    self._latest_telemetry_dict["controller"] = {
+                                        "connected": True,
+                                        "hand": h_str,
+                                        "trigger": bool(data.get("trigger", False)),
+                                        "grip": bool(data.get("grip", False)),
+                                        "gripper_btn": bool(data.get("gripper_btn", False)),
+                                        "drive_mode": bool(self._drive_mode)
+                                    }
+                                    self._latest_telemetry_bytes = json.dumps(self._latest_telemetry_dict).encode("utf-8")
                     except json.JSONDecodeError:
                         pass
             except (websockets.exceptions.ConnectionClosed, Exception):

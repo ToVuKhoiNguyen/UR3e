@@ -93,7 +93,7 @@ class TeleopViserUI:
         self.ui_grasp_state = StatusProxy(self._on_grasp_change, "Empty")
 
         # Bảng điều khiển GUI tinh gọn
-        with self.server.gui.add_folder("VR / Chuột Teleoperation"):
+        with self.server.gui.add_folder("Teleoperation"):
             # 1. Bảng trạng thái gọn gàng (Thay thế hoàn toàn 4 ô input xám)
             self._md_status = self.server.gui.add_markdown(self._build_status_md())
             self.server.gui.add_divider()

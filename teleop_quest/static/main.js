@@ -24,6 +24,8 @@
         let glContext = null;
         let activeHandedness = 'right';
         let lastDriveTogglePressed = false;
+        let gripperClosedState = false;
+        let lastGripperRawPressed = false;
 
         function updateCamDisplay(src) {
             const camImg = document.getElementById('wrist-cam-img');
@@ -36,6 +38,101 @@
                 placeholder.style.display = 'none';
             }
         }
+
+        let isWsActive = false;
+        let lastTelemetryTime = 0;
+
+        function updateTelemetryUI(data) {
+            if (!data) return;
+
+            // 1. Cập nhật ROBOT POSE (Position & Orientation)
+            if (data.pos && data.pos.length >= 3) {
+                if (elValX) elValX.innerText = data.pos[0].toFixed(3);
+                if (elValY) elValY.innerText = data.pos[1].toFixed(3);
+                if (elValZ) elValZ.innerText = data.pos[2].toFixed(3);
+            }
+            if (data.quat && data.quat.length >= 4) {
+                // Backend gửi [qw, qx, qy, qz]
+                if (elValQw) elValQw.innerText = data.quat[0].toFixed(3);
+                if (elValQx) elValQx.innerText = data.quat[1].toFixed(3);
+                if (elValQy) elValQy.innerText = data.quat[2].toFixed(3);
+                if (elValQz) elValQz.innerText = data.quat[3].toFixed(3);
+            }
+
+            // 2. Cập nhật Robot Status Badge
+            const elRobotStatus = document.getElementById('robot-status-badge');
+            if (elRobotStatus && data.status) {
+                elRobotStatus.innerText = data.status;
+                let st = data.status.toLowerCase();
+                if (st.includes('tracking') || st.includes('home') || st.includes('bật') || st.includes('sẵn sàng') || st.includes('standby')) {
+                    elRobotStatus.className = 'badge green';
+                } else if (st.includes('lỗi') || st.includes('error') || st.includes('stop') || st.includes('kẹt')) {
+                    elRobotStatus.className = 'badge red';
+                } else {
+                    elRobotStatus.className = 'badge orange';
+                }
+            }
+
+            // 3. Cập nhật Gripper State
+            let isGripperClosed = false;
+            if (typeof data.gripper !== 'undefined') {
+                isGripperClosed = Boolean(data.gripper);
+            } else if (data.controller && typeof data.controller.gripper_btn !== 'undefined') {
+                isGripperClosed = Boolean(data.controller.gripper_btn);
+            }
+            gripperClosedState = isGripperClosed;
+            if (elValGripperBtn) {
+                elValGripperBtn.innerText = isGripperClosed ? "Closed (Suction ON)" : "Open (Suction OFF)";
+                elValGripperBtn.className = isGripperClosed ? "badge red" : "badge gray";
+            }
+
+            // 4. Cập nhật VR CONTROLLER Card (cho màn hình quan sát PC hoặc khi không trong phiên XR)
+            if (!xrSession && data.controller) {
+                const ctrl = data.controller;
+                if (elValSource) {
+                    if (ctrl.connected) {
+                        elValSource.innerText = ctrl.hand || "Right Hand";
+                        elValSource.style.color = "#10b981";
+                        elValSource.style.fontWeight = "bold";
+                    } else {
+                        elValSource.innerText = "Waiting...";
+                        elValSource.style.color = "#64748b";
+                        elValSource.style.fontWeight = "normal";
+                    }
+                }
+                if (elValTrigger) {
+                    elValTrigger.innerText = ctrl.trigger ? "Pressed" : "Released";
+                    elValTrigger.className = ctrl.trigger ? "badge red" : "badge gray";
+                }
+                if (elValGrip) {
+                    elValGrip.innerText = ctrl.grip ? "Pressed" : "Released";
+                    elValGrip.className = ctrl.grip ? "badge red" : "badge gray";
+                }
+                if (elValMode && typeof ctrl.drive_mode !== 'undefined') {
+                    elValMode.innerText = ctrl.drive_mode ? "Drive Mode" : "Edit Mode";
+                    elValMode.className = ctrl.drive_mode ? "badge green" : "badge orange";
+                }
+            }
+        }
+
+        async function fetchTelemetryPoll() {
+            // Nếu WebSocket đang nhận dữ liệu trực tiếp trong 400ms gần nhất thì không cần poll
+            if (isWsActive && (Date.now() - lastTelemetryTime < 400)) {
+                return;
+            }
+            try {
+                const res = await fetch(`/telemetry.json?t=${Date.now()}`, { cache: "no-store" });
+                if (res.ok) {
+                    const data = await res.json();
+                    updateTelemetryUI(data);
+                }
+            } catch (err) {
+                // Ignore network glitch
+            }
+        }
+
+        // Khởi động vòng lặp polling 10Hz (mỗi 100ms) để cập nhật HUD màn hình PC lập tức
+        setInterval(fetchTelemetryPoll, 100);
 
         function connectWebSocket() {
             let host = window.location.hostname || '127.0.0.1';
@@ -52,6 +149,7 @@
             }
 
             ws.onopen = () => {
+                isWsActive = true;
                 statusDiv.innerText = isHttps ? "Connected (Secure WSS)" : "Connected (Local WS)";
                 statusDiv.classList.remove("warning");
                 statusDiv.classList.add("success");
@@ -59,10 +157,9 @@
             };
 
             ws.onerror = (err) => {
-                statusDiv.innerText = isHttps ? "Connection Error on port 8444" : "Connection Error on port 8445";
-                statusDiv.classList.remove("success");
-                statusDiv.classList.add("warning");
-                console.error("WS Error", err);
+                isWsActive = false;
+                statusDiv.innerText = "WS Reconnecting (HTTP Active)";
+                console.warn("WS Error (falling back to HTTP Telemetry)", err);
             };
 
             ws.onmessage = (event) => {
@@ -77,41 +174,18 @@
                     } else if (data.type === 'teleop_state') {
                         setDriveMode(Boolean(data.enabled), false);
                     } else if (data.type === 'camera' && data.image) {
-                        lastCamUpdate = Date.now();
                         updateCamDisplay('data:image/jpeg;base64,' + data.image);
                     } else if (data.type === 'robot_telemetry') {
-                        if (data.pos && data.pos.length >= 3) {
-                            if (elValX) elValX.innerText = data.pos[0].toFixed(3);
-                            if (elValY) elValY.innerText = data.pos[1].toFixed(3);
-                            if (elValZ) elValZ.innerText = data.pos[2].toFixed(3);
-                        }
-                        if (data.quat && data.quat.length >= 4) {
-                            // Backend gửi [qw, qx, qy, qz]
-                            if (elValQw) elValQw.innerText = data.quat[0].toFixed(3);
-                            if (elValQx) elValQx.innerText = data.quat[1].toFixed(3);
-                            if (elValQy) elValQy.innerText = data.quat[2].toFixed(3);
-                            if (elValQz) elValQz.innerText = data.quat[3].toFixed(3);
-                        }
-                        const elRobotStatus = document.getElementById('robot-status-badge');
-                        if (elRobotStatus && data.status) {
-                            elRobotStatus.innerText = data.status;
-                            let st = data.status.toLowerCase();
-                            if (st.includes('tracking') || st.includes('home') || st.includes('bật') || st.includes('sẵn sàng') || st.includes('standby')) {
-                                elRobotStatus.className = 'badge green';
-                            } else if (st.includes('lỗi') || st.includes('error') || st.includes('stop') || st.includes('kẹt')) {
-                                elRobotStatus.className = 'badge red';
-                            } else {
-                                elRobotStatus.className = 'badge orange';
-                            }
-                        }
+                        isWsActive = true;
+                        lastTelemetryTime = Date.now();
+                        updateTelemetryUI(data);
                     }
                 } catch (e) { console.error("WS error", e); }
             };
 
             ws.onclose = () => {
-                statusDiv.innerText = "Disconnected. Reconnecting...";
-                statusDiv.classList.remove("success");
-                statusDiv.classList.add("warning");
+                isWsActive = false;
+                statusDiv.innerText = "WS Disconnected (HTTP Active)";
                 setTimeout(connectWebSocket, 2000);
             };
         }
@@ -182,6 +256,8 @@
                     type: 'ui_state',
                     drive_mode: uiLocked
                 }));
+            } else if (notifyServer) {
+                fetch(`/api/drive_mode?state=${uiLocked}`).catch(() => {});
             }
         }
 
@@ -216,6 +292,8 @@
             }
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'go_home' }));
+            } else {
+                fetch('/api/go_home').catch(() => {});
             }
             let elHome = document.getElementById('val-home-btn');
             if (elHome) {
@@ -328,6 +406,7 @@
                 if (pose) {
                     let triggerPressed = false;
                     let gripPressed = false;
+                    let gripperRawPressed = false;
                     let gripperBtnPressed = false;
                     let driveTogglePressed = false;
                     let thumbstickPressed = false;
@@ -340,7 +419,7 @@
                         // Button 3: Thumbstick Click (nhấn cần gạt Analog) -> Lệnh Go Home
                         if (activeSource.gamepad.buttons.length > 3) thumbstickPressed = activeSource.gamepad.buttons[3].pressed;
                         // Button 4: Nút A (tay phải) hoặc Nút X (tay trái) - Kẹp/Nhả Gripper
-                        if (activeSource.gamepad.buttons.length > 4) gripperBtnPressed = activeSource.gamepad.buttons[4].pressed;
+                        if (activeSource.gamepad.buttons.length > 4) gripperRawPressed = activeSource.gamepad.buttons[4].pressed;
                         // Button 5: Nút B (tay phải) hoặc Nút Y (tay trái) - Phím cứng chuyển đổi Drive Mode hoặc Giữ để Go Home
                         if (activeSource.gamepad.buttons.length > 5) driveTogglePressed = activeSource.gamepad.buttons[5].pressed;
                     }
@@ -375,14 +454,30 @@
                         }
                     }
 
-                    // 3. Kiểm tra cả tay cầm phụ nếu có (ví dụ tay trái nhấn cần gạt L3)
+                    // 3. Kiểm tra cả tay cầm phụ nếu có (ví dụ tay trái nhấn cần gạt L3 hoặc nút X)
                     for (let s of session.inputSources) {
                         if (s !== activeSource && s.gamepad && s.gamepad.buttons) {
                             if (s.gamepad.buttons.length > 3 && s.gamepad.buttons[3].pressed) {
                                 triggerGoHome(s);
                             }
+                            if (s.gamepad.buttons.length > 4 && s.gamepad.buttons[4].pressed) {
+                                gripperRawPressed = true;
+                            }
                         }
                     }
+
+                    // 4. Xử lý cơ chế Toggle Gripper (Bấm 1 lần để kẹp/hút, bấm lần nữa để thả)
+                    let gripperToggleTriggered = false;
+                    if (gripperRawPressed && !lastGripperRawPressed) {
+                        gripperToggleTriggered = true;
+                        gripperClosedState = !gripperClosedState;
+                        console.log(`[Gripper Toggle] Chuyển trạng thái: ${gripperClosedState ? 'KẸP (CLOSED)' : 'THẢ (OPEN)'}`);
+                        if (activeSource.gamepad && activeSource.gamepad.hapticActuators && activeSource.gamepad.hapticActuators.length > 0) {
+                            activeSource.gamepad.hapticActuators[0].pulse(gripperClosedState ? 0.9 : 0.4, 120);
+                        }
+                    }
+                    lastGripperRawPressed = gripperRawPressed;
+                    gripperBtnPressed = gripperClosedState;
 
                     let pos = pose.transform.position;
                     let quat = pose.transform.orientation;
@@ -394,7 +489,10 @@
                         quat: [quat.w, quat.x, quat.y, quat.z],
                         trigger: triggerPressed,
                         grip: gripPressed,
+                        gripper_raw: gripperRawPressed,
+                        gripper_toggle_btn: gripperToggleTriggered,
                         gripper_btn: gripperBtnPressed,
+                        button_a: gripperRawPressed,
                         drive_mode: uiLocked
                     }));
                     
@@ -402,6 +500,8 @@
                     
                     // Cập nhật dữ liệu lên URSim Layout
                     elValSource.innerText = handName;
+                    elValSource.style.color = "#10b981";
+                    elValSource.style.fontWeight = "bold";
                     
                     elValTrigger.innerText = triggerPressed ? "Pressed" : "Released";
                     elValTrigger.className = triggerPressed ? "badge red" : "badge gray";
@@ -410,7 +510,7 @@
                     elValGrip.className = gripPressed ? "badge red" : "badge gray";
 
                     if (elValGripperBtn) {
-                        elValGripperBtn.innerText = gripperBtnPressed ? "Closed" : "Open";
+                        elValGripperBtn.innerText = gripperBtnPressed ? "Closed (Suction ON)" : "Open (Suction OFF)";
                         elValGripperBtn.className = gripperBtnPressed ? "badge red" : "badge gray";
                     }
                     
@@ -421,7 +521,9 @@
 
             // Ghi log để debug nếu không có tay cầm nào được nhận diện
             if (!sentData) {
-                elValSource.innerText = "Đang chờ...";
+                elValSource.innerText = "Waiting...";
+                elValSource.style.color = "#64748b";
+                elValSource.style.fontWeight = "normal";
                 
                 let debugStr = "";
                 for(let s of session.inputSources) {
