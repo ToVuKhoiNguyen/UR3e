@@ -44,7 +44,7 @@ IK_RETURN_SEEDS = 5                # Number of IK solutions to evaluate
 # within URDF range (±2π). Clamping to ±180° keeps motion safe and predictable.
 UR3E_LIMITS = [
     (-2 * math.pi, 2 * math.pi),  # shoulder_pan_joint   — ±360°
-    (-math.pi, 0.05),             # shoulder_lift_joint  — [-180°, ~3°] vươn tự nhiên, chống chúi lật bàn
+    (-math.pi, 0.25),             # shoulder_lift_joint  — [-180°, ~14°] vươn tự nhiên, chống chúi lật bàn
     (-2.80, 2.80),                # elbow_joint          — Cho phép gập sâu tự nhiên (-160° đến 160°), CuRobo tự quản lý va chạm
     (-2 * math.pi, 2 * math.pi),  # wrist_1_joint        — Cho phép quay tự nhiên tránh đảo nhánh IK gây vặn xoắn
     (-2 * math.pi, 2 * math.pi),  # wrist_2_joint        — Cho phép quay tự nhiên tránh đảo nhánh IK gây vặn xoắn
@@ -204,11 +204,15 @@ class CuRoboIK:
                 robot=ROBOT_CONFIG,
                 scene_model=scene_path,
                 num_seeds=num_seeds,
+                position_tolerance=0.008,
+                orientation_tolerance=0.15,
             )
         else:
             self.cfg = InverseKinematicsCfg.create(
                 robot=ROBOT_CONFIG,
                 num_seeds=num_seeds,
+                position_tolerance=0.008,
+                orientation_tolerance=0.15,
             )
         self.solver     = InverseKinematics(self.cfg)
         self.n_seeds    = return_seeds
@@ -269,7 +273,7 @@ class CuRoboIK:
 
             max_diff = max(abs(norm_q[j] - ref_q[j]) for j in range(6))
             # Ưu tiên các nghiệm cùng nhánh động học liên tục (tránh đảo nhánh vặn xoắn cổ tay)
-            branch_penalty = 50.0 if max_diff > 0.8 else 0.0
+            branch_penalty = 20.0 if max_diff > 0.8 else 0.0
             dist = sum(abs(norm_q[j] - ref_q[j]) for j in range(6)) + branch_penalty
             if dist < best_dist:
                 best_dist, best = dist, norm_q

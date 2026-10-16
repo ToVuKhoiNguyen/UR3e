@@ -49,13 +49,6 @@ robot_cfg:
       tool0:
         - center: [0, 0, 0.035]
           radius: 0.035
-        # Khung va chạm camera ngàm kẹp (RealSense)
-        - center: [0.0, 0.045, 0.035]
-          radius: 0.022
-        - center: [0.025, 0.045, 0.035]
-          radius: 0.022
-        - center: [-0.025, 0.045, 0.035]
-          radius: 0.022
     cspace:
       cspace_distance_weight:
       - 1.0

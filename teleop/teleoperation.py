@@ -44,7 +44,7 @@ class CuRoboIKSolver:
 #
 class SafetyGate:
     SHOULDER_PAN_LIMIT = 6.28   # ±360°
-    SHOULDER_LIFT_MAX = 0.05    # q1 không được vượt quá +0.05 rad (chống chúi cắm bắp tay xuống bàn)
+    SHOULDER_LIFT_MAX = 0.25    # q1 không được vượt quá +0.25 rad (~14 độ)
     SHOULDER_LIFT_MIN = -3.14   # q1 không được nhỏ hơn -3.14 rad
     ELBOW_LIMIT = 2.80          # |q2| <= 2.80 rad (~160 độ) - Cho phép gập sâu, CuRobo tự quản lý va chạm
     WRIST_LIMIT = 6.28          # Cho phép xoay cổ tay tự nhiên (CuRobo đã kiểm tra self-collision)
@@ -223,25 +223,20 @@ class TeleoperationController:
         with self._lock:
             return dict(self._latency)
 
-    def step(self, q_real):
+    def step(self, q_real, pose=None):
         """
         Một vòng lặp 20Hz.
 
         Input:  q_real list[6 Radian] - góc khớp thực tế từ RTDE Port 30004
+                pose dict (tùy chọn) - pose mục tiêu từ PoseSource đã lấy sẵn
         Output: None (side-effect: gọi servoJ hoặc đứng im)
-
-        Luồng xử lý:
-          1. Lấy pose từ PoseSource (None nếu không đổi → bỏ qua)
-          2. Giải IK bằng CuRobo GPU (warm-start từ last_valid_q hoặc q_real)
-          3. Kiểm tra bước nhảy nhánh IK & Rate Limiter
-          4. Kiểm tra SafetyGate (singularity, wrist limits)
-          5. Gọi RTDEControl.servoJ nếu an toàn
         """
         if not self._enabled:
             return
 
         # ── Lấy pose mới từ PoseSource ──────────────────────────────────────
-        pose = self._pose.get_pose()
+        if pose is None:
+            pose = self._pose.get_pose()
         if pose is None:
             return  # pose không đổi → không gửi lệnh
 
@@ -258,7 +253,7 @@ class TeleoperationController:
             # Kiểm tra bước nhảy nhánh IK bất thường (phát hiện lật khớp do gần điểm kỳ dị Singularity)
             if self._last_valid_q is not None:
                 max_jump = max(abs(q_target[i] - self._last_valid_q[i]) for i in range(6))
-                if max_jump > 1.5:  # ~86 độ (chỉ chặn khi xảy ra đảo nhánh IK đột ngột)
+                if max_jump > 2.2:  # ~126 độ (chỉ chặn khi xảy ra đảo nhánh IK đột ngột)
                     with self._lock:
                         self._status = "Tư thế kẹt (Lỗi vặn xoắn khớp) - Dừng im"
                     return
@@ -278,9 +273,9 @@ class TeleoperationController:
             pos = pose["pos"]
             dist_base = (pos[0]**2 + pos[1]**2 + (pos[2] - 0.15)**2)**0.5
             with self._lock:
-                if dist_base > 0.44:
+                if dist_base > 0.49:
                     self._status = "Ngoài tầm với (Out of Reach) - Dừng im"
-                elif pos[2] < 0.02:
+                elif pos[2] < -0.01:
                     self._status = "Sát mặt bàn bảo vệ (Table Limit) - Dừng im"
                 else:
                     self._status = "Tư thế không khả thi / Vướng vật cản - Dừng im"

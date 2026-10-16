@@ -483,6 +483,16 @@
                     let pos = pose.transform.position;
                     let quat = pose.transform.orientation;
 
+                    let headQuat = null;
+                    let headPos = null;
+                    let viewerPose = frame.getViewerPose(xrRefSpace);
+                    if (viewerPose) {
+                        let hp = viewerPose.transform.position;
+                        let ho = viewerPose.transform.orientation;
+                        headPos = [hp.x, hp.y, hp.z];
+                        headQuat = [ho.w, ho.x, ho.y, ho.z];
+                    }
+
                     let stickTilted = false;
                     if (activeSource.gamepad && activeSource.gamepad.axes && activeSource.gamepad.axes.length >= 4) {
                         stickTilted = Math.abs(activeSource.gamepad.axes[2]) > 0.15 || Math.abs(activeSource.gamepad.axes[3]) > 0.15;
@@ -493,6 +503,8 @@
                         hand: activeSource.handedness || "unknown",
                         pos: [pos.x, pos.y, pos.z],
                         quat: [quat.w, quat.x, quat.y, quat.z],
+                        head_pos: headPos,
+                        head_quat: headQuat,
                         trigger: triggerPressed,
                         grip: gripPressed,
                         gripper_raw: gripperRawPressed,

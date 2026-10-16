@@ -30,9 +30,15 @@ class DeltaPoseSource:
         self._ema_quat_xyzw = None
         
         self.enable_axis_snapping = os.environ.get("AXIS_SNAPPING", "1") == "1"
-        self.nav_mode = os.environ.get("NAV_MODE", "arm_plane").lower()
+        self.nav_mode = os.environ.get("NAV_MODE", "cylindrical").lower()
         self.rotation_mode = os.environ.get("ROTATION_MODE", "decoupled_3axis").lower()
+        self.heading_mode = os.environ.get("HEADING_MODE", "desk_aligned").lower()
+        self.axis_snap_thresh = float(os.environ.get("AXIS_SNAP_THRESH", "0.50"))
         self.rot_scale = float(os.environ.get("ROT_SCALE", "1.1"))
+        self._current_delta_theta = 0.0
+        self._anchor_u_fwd = None
+        self._anchor_u_right = None
+        self._latched_trans_axis = None
 
         # Cấu hình chống nhiễu chuyên sâu (Anti-Noise & Jitter Suppression)
         self.rot_deadband = float(os.environ.get("ROT_DEADBAND", "0.045"))  # ~2.6 độ (triệt tiêu rung tay khi bóp giữ phím)
@@ -44,57 +50,58 @@ class DeltaPoseSource:
         self._last_button_state = 0
         self.out_of_reach_time = 0.0
 
-    def _apply_soft_axis_snapping(self, delta_robot):
+    def _apply_aggressive_axis_isolation(self, delta_vec):
         """
-        Khóa trục thông minh (Soft Axis Snapping) đa tầng chống nhiễu:
-        - Triệt tiêu rung lắc / lệch tay sinh trắc học khi người dùng chủ đích di chuyển theo một trục chính.
-        - Khóa trục phụ < 28% về 0.0, chuyển tiếp mượt 28% - 50% bằng hàm Hermite smoothstep.
-        - Nén bình phương rung lắc trục Z khi lướt phẳng XY, nén mặt phẳng XY khi nâng hạ thẳng đứng.
+        Thuật toán triệt tiêu nhiễu chéo đa trục mạnh mẽ (Aggressive Axis Isolation):
+        - Tầng 1: So sánh độ lớn giữa 3 trục (Tiến/Lùi, Phải/Trái, Cao/Thấp). Trục lớn nhất là Trục Chủ Đạo.
+        - Tầng 2: Triệt tiêu mọi trục phụ có độ lớn < 50% trục chính về 0.0 tuyệt đối.
+        - Tầng 3: Khóa rãnh hành trình (Axis Latching) trong 1 lần bóp cò: khi đã xác định
+                  trục chính ban đầu, duy trì trục đó xuyên suốt hành trình bóp cò.
         """
-        dx, dy, dz = delta_robot[0], delta_robot[1], delta_robot[2]
-        
-        # 1. Khóa trục mặt phẳng ngang (X - Tiến/Lùi vs Y - Trái/Phải):
-        abs_x = abs(dx)
-        abs_y = abs(dy)
-        
-        if abs_x > 0.006 or abs_y > 0.006:
-            if abs_x >= abs_y:
-                ratio = abs_y / (abs_x + 1e-6)
-                if ratio < 0.28:
-                    scale_y = 0.0
-                elif ratio < 0.50:
-                    t = (ratio - 0.28) / (0.50 - 0.28)
-                    scale_y = t * t * (3.0 - 2.0 * t)
-                else:
-                    scale_y = 1.0
-                dy = dy * scale_y
+        vec = np.array(delta_vec, dtype=float)
+        abs_v = np.abs(vec)
+        max_idx = int(np.argmax(abs_v))
+        max_val = abs_v[max_idx]
+
+        if max_val < 0.006:  # 6mm deadband
+            return np.zeros(3)
+
+        # Khóa rãnh hành trình (Axis Latching):
+        # Khi tay đã dịch chuyển dứt khoát (> 1.2cm), chốt rãnh trục chủ đạo
+        if self._latched_trans_axis is None and max_val >= 0.012:
+            self._latched_trans_axis = max_idx
+
+        dominant_idx = self._latched_trans_axis if self._latched_trans_axis is not None else max_idx
+        dominant_val = abs_v[dominant_idx]
+
+        # Nếu trục khác vượt trội áp đảo trục đang khóa (> 1.6 lần), cho phép đổi trục
+        if max_idx != dominant_idx and abs_v[max_idx] > dominant_val * 1.6:
+            dominant_idx = max_idx
+            self._latched_trans_axis = max_idx
+            dominant_val = abs_v[dominant_idx]
+
+        out = np.zeros(3)
+        out[dominant_idx] = vec[dominant_idx]
+
+        # Triệt tiêu mạnh các trục phụ:
+        # - Nếu tỉ lệ phụ/chính < snap_threshold (mặc định 0.50): TRIỆT TIÊU HOÀN TOÀN VỀ 0.0!
+        # - Nếu snap_threshold <= tỉ lệ <= 0.75: chuyển tiếp mượt (smooth Hermite blend)
+        # - Nếu > 0.75: người dùng cố tình đi chéo góc lớn -> cho phép mở trục phụ
+        snap_thresh = self.axis_snap_thresh
+        for i in range(3):
+            if i == dominant_idx:
+                continue
+            ratio = abs_v[i] / (dominant_val + 1e-6)
+            if ratio < snap_thresh:
+                out[i] = 0.0
+            elif ratio < 0.75:
+                t = (ratio - snap_thresh) / (0.75 - snap_thresh)
+                scale = t * t * (3.0 - 2.0 * t)
+                out[i] = vec[i] * scale
             else:
-                ratio = abs_x / (abs_y + 1e-6)
-                if ratio < 0.28:
-                    scale_x = 0.0
-                elif ratio < 0.50:
-                    t = (ratio - 0.28) / (0.50 - 0.28)
-                    scale_x = t * t * (3.0 - 2.0 * t)
-                else:
-                    scale_x = 1.0
-                dx = dx * scale_x
+                out[i] = vec[i]
 
-        # 2. Tách biệt mặt phẳng ngang (X, Y) và trục đứng (Z):
-        d_xy = np.sqrt(dx * dx + dy * dy)
-        abs_z = abs(dz)
-        
-        if d_xy > 0.020 and abs_z < 0.012:
-            # Người dùng đang trượt phẳng trên mặt bàn: Nén rung lắc trục Z triệt để (bình phương tỷ lệ)
-            ratio_z = abs_z / 0.012
-            dz = dz * (ratio_z * ratio_z)
-        elif abs_z > 0.020 and d_xy < 0.012:
-            # Người dùng đang nhấc/hạ thẳng đứng: Nén rung lắc mặt phẳng XY triệt để
-            ratio_xy = d_xy / 0.012
-            factor = ratio_xy * ratio_xy
-            dx = dx * factor
-            dy = dy * factor
-
-        return np.array([dx, dy, dz])
+        return out
 
     def _apply_soft_rotation_snapping(self, rotvec_tcp, rot_deadband=None):
         """
@@ -214,14 +221,42 @@ class DeltaPoseSource:
             except Exception:
                 self._anchor_theta_arm = None
             
+            # Xác lập hệ quy chiếu điều khiển (Heading Reference):
+            # 1. Chế độ Bàn máy cố định (Desk-Aligned / World Frame - Mặc định):
+            #    Tuyệt đối không bị ảnh hưởng khi mắt liếc nhìn camera hay vật thể.
+            #    Đẩy thẳng tới bàn máy = TIẾN (-Z WebXR), Gạt ngang mặt bàn = SANG PHẢI (+X WebXR).
+            # 2. Chế độ Theo hướng nhìn kính (Head-Centric): khi người dùng đặt HEADING_MODE=head_centric
+            if self.heading_mode == "head_centric":
+                head_quat = frame.get("head_quat", None)
+                if head_quat is not None:
+                    r_head = R.from_quat([head_quat[1], head_quat[2], head_quat[3], head_quat[0]])
+                    v_fwd = r_head.apply([0, 0, -1])  # Hướng nhìn trong không gian phòng
+                    fx, fz = v_fwd[0], v_fwd[2]
+                    norm_h = np.hypot(fx, fz)
+                    if norm_h > 0.05:
+                        self._anchor_u_fwd = np.array([fx / norm_h, 0.0, fz / norm_h])
+                        self._anchor_u_right = np.array([-fz / norm_h, 0.0, fx / norm_h])
+                    else:
+                        self._anchor_u_fwd = np.array([0.0, 0.0, -1.0])
+                        self._anchor_u_right = np.array([1.0, 0.0, 0.0])
+                else:
+                    self._anchor_u_fwd = np.array([0.0, 0.0, -1.0])
+                    self._anchor_u_right = np.array([1.0, 0.0, 0.0])
+            else:
+                # Mặc định chuẩn: Khung Bàn Máy Cố Định (Desk-Aligned)
+                # Loại bỏ 100% hiện tượng liếc mắt làm chéo góc đẩy tay
+                self._anchor_u_fwd = np.array([0.0, 0.0, -1.0])
+                self._anchor_u_right = np.array([1.0, 0.0, 0.0])
+
             self._ema_pos = np.copy(self._anchor_tcp[:3])
             self._ema_quat_xyzw = np.copy(self._anchor_quat_robot_xyzw)
             self._last_dominant_rot_axis = None
+            self._latched_trans_axis = None
             self._last_button_state = current_button_state
             return None # Bỏ qua frame đầu tiên để tránh giật
 
         # ===============================
-        # TÍNH TOÁN DELTA TỊNH TIẾN (WORLD-CENTRIC)
+        # TÍNH TOÁN DELTA TỊNH TIẾN (HEAD-CENTRIC & WORLD)
         # ===============================
         diag_msg = "STANDING STILL"
         delta_mag = 0.0
@@ -243,37 +278,108 @@ class DeltaPoseSource:
             else:
                 # SOFT DEADBAND: Khử độ nhảy vọt khi vượt ngưỡng
                 delta_q_world = delta_q_world * ((delta_mag - self.pos_deadband) / delta_mag)
-                
-                abs_delta = np.abs(delta_q_world)
-                max_axis = np.argmax(abs_delta)
-                
-                # Chẩn đoán (Không gian WebXR: +X Phải, +Y Lên, +Z Lùi về phía người dùng)
-                if max_axis == 1:
-                    direction_word = "LÊN TRÊN" if delta_q_world[max_axis] > 0 else "XUỐNG DƯỚI"
-                elif max_axis == 2:
-                    direction_word = "LÙI (Về phía sếp)" if delta_q_world[max_axis] > 0 else "TIẾN (Đâm thẳng)"
-                else:
-                    direction_word = "SANG PHẢI" if delta_q_world[max_axis] > 0 else "SANG TRÁI"
-                    
-                diag_msg = f"{direction_word}"
                         
-            # Lấy các thành phần di chuyển từ tay người dùng (WebXR):
-            # - delta_q_world[2]: Lùi (+Z) / Tiến (-Z)
-            # - delta_q_world[0]: Sang phải (+X) / Sang trái (-X)
-            # - delta_q_world[1]: Lên (+Y) / Xuống (-Y)
-            d_forward = -delta_q_world[2]   # Tiến / Lùi
-            d_lateral =  delta_q_world[0]   # Phải / Trái
-            d_vertical = delta_q_world[1]   # Lên / Xuống
+            # Chiếu cử động tay người dùng theo hệ quy chiếu bàn máy / hướng nhìn:
+            if self._anchor_u_fwd is not None and self._anchor_u_right is not None:
+                d_forward_raw = float(np.dot(delta_q_world, self._anchor_u_fwd))
+                d_lateral_raw = float(np.dot(delta_q_world, self._anchor_u_right))
+                d_vertical_raw = float(delta_q_world[1])
+            else:
+                d_forward_raw = -delta_q_world[2]   # Tiến (-Z) / Lùi (+Z)
+                d_lateral_raw =  delta_q_world[0]   # Phải (+X) / Trái (-X)
+                d_vertical_raw = delta_q_world[1]   # Lên (+Y) / Xuống (-Y)
 
-            # Áp dụng Khóa trục thông minh (Soft Axis Snapping) trên cử động tay người
+            # Áp dụng Thuật toán triệt tiêu nhiễu chéo đa trục mạnh mẽ (Aggressive Axis Isolation):
             if self.enable_axis_snapping:
-                d_snapped = self._apply_soft_axis_snapping(np.array([d_forward, d_lateral, d_vertical]))
-                d_forward, d_lateral, d_vertical = d_snapped[0], d_snapped[1], d_snapped[2]
+                d_snapped = self._apply_aggressive_axis_isolation(np.array([d_forward_raw, d_lateral_raw, d_vertical_raw]))
+                d_forward = d_snapped[0]
+                d_lateral = d_snapped[1]
+                d_vertical = d_snapped[2]
+            else:
+                d_forward = d_forward_raw
+                d_lateral = d_lateral_raw
+                d_vertical = d_vertical_raw
 
-            if self.nav_mode == "arm_plane" and self._anchor_tcp is not None:
-                # --- CHẾ ĐỘ MẶT PHẲNG CÁNH TAY CƠ HỌC CHUẨN (TRUE MECHANICAL ARM PLANE) ---
-                # Hướng "Tiến" là phương gập duỗi tự nhiên của bắp tay (trùng khớp với góc quay khớp đế q0).
-                # Triệt tiêu hoàn toàn góc lệch cơ khí vai (13.1cm), giúp khớp đế q0 đứng im khi thu/duỗi tay thẳng.
+            # Chẩn đoán biến thiên đa trục đã triệt tiêu sạch nhiễu (đơn vị centimet)
+            cm_fwd = d_forward * 100.0
+            cm_lat = d_lateral * 100.0
+            cm_vert = d_vertical * 100.0
+            fwd_str = f"Tiến {cm_fwd:+.1f}cm" if cm_fwd >= 0 else f"Lùi {cm_fwd:+.1f}cm"
+            lat_str = f"Phải {cm_lat:+.1f}cm" if cm_lat >= 0 else f"Trái {cm_lat:+.1f}cm"
+            vert_str = f"Cao {cm_vert:+.1f}cm" if cm_vert >= 0 else f"Thấp {cm_vert:+.1f}cm"
+
+            # Tự động sắp xếp: Trục nào có độ lớn dịch chuyển lớn nhất sẽ nằm ĐẦU TIÊN
+            movements = [
+                (abs(cm_fwd), fwd_str),
+                (abs(cm_lat), lat_str),
+                (abs(cm_vert), vert_str)
+            ]
+            movements.sort(key=lambda m: m[0], reverse=True)
+            if delta_mag >= self.pos_deadband:
+                diag_msg = f"{movements[0][1]} | {movements[1][1]} | {movements[2][1]}"
+
+            if self.nav_mode in ("cylindrical", "clock_face") and self._anchor_tcp is not None:
+                # ===============================================================
+                # CHẾ ĐỘ MẶT ĐỒNG HỒ & THU/DUỖI TAY MÁY CƠ HỌC (TRUE MECHANICAL CLOCK)
+                # ===============================================================
+                # Tâm đồng hồ: Trục quay khớp đế Base Z (0, 0)
+                # Kim đồng hồ: Góc vật lý của khớp đế q0
+                # Vươn / Thu kim: Duỗi hoặc gập bắp tay theo phương vươn u_reach của q0
+                p_anc = np.array(self._anchor_tcp[:3], dtype=float)
+                r_reach = float(np.hypot(p_anc[0], p_anc[1]))
+
+                q0_anc = float(self._anchor_theta_arm) if self._anchor_theta_arm is not None else 0.0
+
+                # 1. Sang Phải / Sang Trái -> Chỉ xoay kim đồng hồ (khớp đế q0) quanh Base Z:
+                # - Sang Phải (d_lateral > 0) -> q0 giảm (quay theo chiều kim đồng hồ)
+                # - Sang Trái (d_lateral < 0) -> q0 tăng (quay ngược chiều kim đồng hồ)
+                delta_arc = d_lateral * self.scale
+                delta_arc = np.clip(delta_arc, -self.max_delta_m, self.max_delta_m)
+                delta_q0 = -delta_arc / max(r_reach, 0.12)
+                delta_q0 = np.clip(delta_q0, -0.65, 0.65)  # Khống chế góc quay tối đa ~37 độ / lần bóp cò
+
+                q0_target = q0_anc + delta_q0
+
+                # Quay vị trí mỏ neo quanh trục Base Z theo góc delta_q0:
+                cos_q = np.cos(delta_q0)
+                sin_q = np.sin(delta_q0)
+                p_rot = np.array([
+                    cos_q * p_anc[0] - sin_q * p_anc[1],
+                    sin_q * p_anc[0] + cos_q * p_anc[1],
+                    p_anc[2]
+                ])
+
+                # 2. Tiến / Lùi -> Duỗi dài hoặc Thu ngắn kim đồng hồ theo phương vươn cơ học:
+                # Vector vươn u_reach nằm trong mặt phẳng tay máy tại góc đế q0_target:
+                u_reach = np.array([np.cos(q0_target), np.sin(q0_target), 0.0])
+                # Tăng hệ số nhạy hướng Tiến/Lùi lên mức 1:1 (scale_reach = 1.05) để vươn dứt khoát
+                scale_reach = float(os.environ.get("REACH_SCALE", "1.05"))
+                delta_reach = d_forward * scale_reach
+                delta_reach = np.clip(delta_reach, -self.max_delta_m, self.max_delta_m)
+
+                # 3. Lên / Xuống -> Nâng hạ chiều cao Z:
+                delta_z = d_vertical * self.scale
+                delta_z = np.clip(delta_z, -self.max_delta_m, self.max_delta_m)
+                z_target = np.clip(p_anc[2] + delta_z, 0.00, 0.58)
+
+                # Tọa độ đích kết hợp:
+                target_pos = p_rot + delta_reach * u_reach
+                target_pos[2] = z_target
+
+                # Giới hạn an toàn bán kính cơ học:
+                # Dải [0.10m, 0.485m] loại bỏ kẹt lùi, bảo vệ tầm với 500mm của UR3e
+                r_target_xy = np.hypot(target_pos[0], target_pos[1])
+                if r_target_xy < 0.10:
+                    scale_r = 0.10 / max(r_target_xy, 1e-6)
+                    target_pos[0] *= scale_r
+                    target_pos[1] *= scale_r
+                elif r_target_xy > 0.485:
+                    scale_r = 0.485 / r_target_xy
+                    target_pos[0] *= scale_r
+                    target_pos[1] *= scale_r
+
+                self._current_delta_theta = delta_q0
+            elif self.nav_mode == "arm_plane" and self._anchor_tcp is not None:
                 theta_arm = self._anchor_theta_arm
                 if theta_arm is None:
                     x_anc = self._anchor_tcp[0]
@@ -281,59 +387,63 @@ class DeltaPoseSource:
                     r_anc = np.hypot(x_anc, y_anc)
                     theta_arm = np.arctan2(y_anc, x_anc) if r_anc > 0.03 else 0.0
 
-                # Vector đơn vị hướng duỗi cánh tay (dọc theo mặt phẳng gập khớp vai & khuỷu): [cos(theta), sin(theta)]
-                # Vector đơn vị tiếp tuyến sang phải: [sin(theta), -cos(theta)]
                 dx_robot = d_forward * np.cos(theta_arm) + d_lateral * np.sin(theta_arm)
                 dy_robot = d_forward * np.sin(theta_arm) - d_lateral * np.cos(theta_arm)
                 dz_robot = d_vertical
-
-                delta_robot_world = np.array([dx_robot, dy_robot, dz_robot])
+                delta_robot_world = np.array([dx_robot, dy_robot, dz_robot]) * self.scale
+                delta_robot_world = np.clip(delta_robot_world, -self.max_delta_m, self.max_delta_m)
+                target_pos = self._anchor_tcp[:3] + delta_robot_world
+                self._current_delta_theta = 0.0
             else:
-                # Chế độ Cartesian Base Link truyền thống (Trục X/Y cố định của bàn máy)
                 delta_robot_world = np.array([
                     d_forward,
                     -d_lateral,
                     d_vertical
-                ])
-
-            delta_robot_world = delta_robot_world * self.scale
-            delta_robot_world = np.clip(delta_robot_world, -self.max_delta_m, self.max_delta_m)
+                ]) * self.scale
+                delta_robot_world = np.clip(delta_robot_world, -self.max_delta_m, self.max_delta_m)
+                target_pos = self._anchor_tcp[:3] + delta_robot_world
+                self._current_delta_theta = 0.0
         else:
             delta_robot_world = np.zeros(3)
             diag_msg = "CHỈ XOAY (KHÓA TỊNH TIẾN)"
-            
-        target_pos = self._anchor_tcp[:3] + delta_robot_world
-        
-        # Workspace safety clamp (Hardcoded UR3e safe zone)
-        target_pos[0] = np.clip(target_pos[0], -0.50, 0.50) # X
-        target_pos[1] = np.clip(target_pos[1], -0.50, 0.50) # Y
-        target_pos[2] = np.clip(target_pos[2], -0.02, 0.60) # Z (an toàn sát mặt bàn)
+            target_pos = np.copy(self._anchor_tcp[:3])
+            self._current_delta_theta = 0.0
 
-        # Slew Rate Limiter: Chống đột biến giật nảy do rớt frame hoặc tracking bị nhảy cóc
+        # Workspace safety clamp (Chuẩn tầm với UR3e 500mm, Z an toàn tuyệt đối trên mặt bàn)
+        target_pos[0] = np.clip(target_pos[0], -0.49, 0.49) # X
+        target_pos[1] = np.clip(target_pos[1], -0.49, 0.49) # Y
+        target_pos[2] = np.clip(target_pos[2], 0.00, 0.58)  # Z (an toàn tuyệt đối không đâm bàn)
+
+        # Slew Rate Limiter: Tăng trần max_step lên 0.055 (5.5cm / 50ms = 1.1 m/s) giúp phản hồi vươn tay nhanh
         if self._ema_pos is not None:
             pos_step = target_pos - self._ema_pos
             step_mag = np.linalg.norm(pos_step)
-            max_step = 0.035  # tối đa 3.5cm / 50ms = 0.7 m/s
+            max_step = 0.055  # tối đa 5.5cm / 50ms = 1.1 m/s
             if step_mag > max_step:
                 target_pos = self._ema_pos + pos_step * (max_step / step_mag)
 
         # Dynamic Adaptive EMA Filter cho Position:
-        # - Khi đứng yên hoặc vi rung nhẹ (< 1cm): alpha = 0.18 (lọc phẳng 100% rung lắc)
-        # - Khi di chuyển dứt khoát (> 3cm): alpha = 0.38 (nhạy bén bám sát cử động)
+        # - Khi đứng yên hoặc vi rung nhẹ (< 1cm): alpha = 0.22 (lọc phẳng vi rung)
+        # - Khi di chuyển dứt khoát (> 3cm): alpha = 0.55 (phản hồi tức thì, không bị trễ)
         if self._ema_pos is None:
             self._ema_pos = target_pos
         else:
             pos_diff = np.linalg.norm(target_pos - self._ema_pos)
             t_pos = np.clip(pos_diff / 0.03, 0.0, 1.0)
             smooth_pos = t_pos * t_pos * (3.0 - 2.0 * t_pos)
-            alpha_pos = 0.18 + (0.38 - 0.18) * smooth_pos
+            alpha_pos = 0.22 + (0.55 - 0.22) * smooth_pos
             self._ema_pos = alpha_pos * target_pos + (1.0 - alpha_pos) * self._ema_pos
 
         current_time = time.time()
-        if diag_msg != self._last_diag_msg or (current_time - self._last_diag_time > 1.5):
+        if diag_msg != self._last_diag_msg or (current_time - self._last_diag_time > 0.6):
             if diag_msg != "STANDING STILL":
                 tp = self._ema_pos
-                print(f"[Chẩn đoán VR] Hướng: {diag_msg} | Lực: {delta_mag*100:.1f}cm | Tọa độ đích (X,Y,Z): [{tp[0]:.3f}, {tp[1]:.3f}, {tp[2]:.3f}]")
+                r_now = float(np.hypot(tp[0], tp[1]))
+                try:
+                    q0_cur_deg = np.degrees(self.ctrl.joints()[0])
+                except Exception:
+                    q0_cur_deg = 0.0
+                print(f"[Đồng Hồ VR] {diag_msg} | Base q0: {q0_cur_deg:+.1f}° (Δ{np.degrees(self._current_delta_theta):+.1f}°) | Vươn R: {r_now:.3f}m | Đích: [{tp[0]:.3f}, {tp[1]:.3f}, {tp[2]:.3f}]")
             self._last_diag_msg = diag_msg
             self._last_diag_time = current_time
 
@@ -373,7 +483,10 @@ class DeltaPoseSource:
                     delta_roll = 0.0
                 else:
                     delta_roll = np.sign(d_roll) * (mag_r - rot_deadband)
-                R_delta_arm = R.identity()
+                if self.nav_mode in ("cylindrical", "clock_face") and is_translating:
+                    R_delta_arm = R.from_rotvec([0.0, 0.0, self._current_delta_theta])
+                else:
+                    R_delta_arm = R.identity()
                 R_delta_tool = R.from_rotvec([0.0, 0.0, delta_roll])
 
                 if not is_translating:
@@ -391,7 +504,10 @@ class DeltaPoseSource:
                     rotvec_tcp = np.zeros(3)
                 else:
                     rotvec_tcp = raw_rotvec * ((mag - rot_deadband) / mag)
-                R_delta_arm = R.identity()
+                if self.nav_mode in ("cylindrical", "clock_face") and is_translating:
+                    R_delta_arm = R.from_rotvec([0.0, 0.0, self._current_delta_theta])
+                else:
+                    R_delta_arm = R.identity()
                 R_delta_tool = R.from_rotvec(rotvec_tcp)
 
                 if not is_translating:
@@ -416,7 +532,7 @@ class DeltaPoseSource:
                 yaw_val   = rotvec_filtered[1]
                 roll_val  = rotvec_filtered[2]
 
-                # 2. Phương án B: Đồng bộ xoay theo Mặt phẳng cánh tay robot (Arm-Plane Rotation)
+                # 2. Phương án B: Đồng bộ xoay theo Mặt phẳng cánh tay robot (Arm-Plane / Cylindrical Rotation)
                 if self.nav_mode == "arm_plane":
                     theta_arm = self._anchor_theta_arm
                     if theta_arm is None:
@@ -436,6 +552,13 @@ class DeltaPoseSource:
                     R_delta_arm = R.from_rotvec(rotvec_arm)
                     # Roll vặn quanh trục kẹp Tool Z (Lắc cổ tay trái/phải)
                     R_delta_tool = R.from_rotvec([0.0, 0.0, roll_val])
+                elif self.nav_mode in ("cylindrical", "clock_face"):
+                    # Đồng bộ hóa góc xoay ngàm kẹp theo chuyển động quay kim đồng hồ của Base (quanh trục Z)
+                    if is_translating:
+                        R_delta_arm = R.from_rotvec([0.0, 0.0, self._current_delta_theta])
+                    else:
+                        R_delta_arm = R.identity()
+                    R_delta_tool = R.from_rotvec(rotvec_filtered)
                 else:
                     R_delta_arm = R.identity()
                     R_delta_tool = R.from_rotvec(rotvec_filtered)
@@ -461,7 +584,13 @@ class DeltaPoseSource:
             R_target_robot = R_delta_arm * R_r_anchor * R_delta_tool
         else:
             self._last_dominant_rot_axis = None
-            R_target_robot = R_r_anchor
+            if self.nav_mode in ("cylindrical", "clock_face") and is_translating:
+                # Khi chỉ bóp Cò tịnh tiến trong chế độ Đồng hồ / Trụ:
+                # Ngàm kẹp tự động xoay theo góc quay Base quanh trục Z để giữ nguyên góc đón vật
+                R_base_rot = R.from_rotvec([0.0, 0.0, self._current_delta_theta])
+                R_target_robot = R_base_rot * R_r_anchor
+            else:
+                R_target_robot = R_r_anchor
         target_quat_xyzw = R_target_robot.as_quat()
         
         # Dynamic Adaptive EMA Filter cho Quaternion (mượt mà, triệt tiêu vi rung)
@@ -524,6 +653,9 @@ class DeltaPoseSource:
         self._anchor_tcp = None
         self._anchor_quat_robot_xyzw = None
         self._anchor_theta_arm = None
+        self._anchor_u_fwd = None
+        self._anchor_u_right = None
+        self._current_delta_theta = 0.0
         self._ema_pos = None
         self._ema_quat_xyzw = None
         self._last_dominant_rot_axis = None

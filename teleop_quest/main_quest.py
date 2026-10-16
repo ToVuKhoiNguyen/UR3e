@@ -209,6 +209,7 @@ def main():
         safety_gate=SafetyGate(guard=guard),
         executor=executor
     )
+    teleop._last_valid_q = list(start_joints)
 
     pose_source = DeltaPoseSource(
         quest_server, ctrl, scale=0.75,
@@ -319,6 +320,7 @@ def main():
             if teleop.enabled:
                 print("[Teleop] KÍCH HOẠT ĐIỀU KHIỂN.")
                 pose_source.reset_anchor()
+                teleop._last_valid_q = list(ctrl.joints())
                 executor.connect()
                 if quest_server.is_connected():
                     watchdog.arm()
@@ -395,7 +397,7 @@ def main():
                     ui.target_widget.wxyz = vr_pose["quat"]
 
                 # Giải IK và gửi lệnh điều khiển tới robot
-                teleop.step(q_real)
+                teleop.step(q_real, pose=vr_pose)
                 current_status = teleop.get_status()
                 status_low = current_status.lower()
 

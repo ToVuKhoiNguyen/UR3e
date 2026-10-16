@@ -4,3 +4,5 @@ certs/
 logs/
 .venv/
 teleop_quest/static/wrist_camera.jpg
+*.log
+scratch/

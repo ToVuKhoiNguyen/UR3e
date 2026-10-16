@@ -61,14 +61,21 @@ def start_adb_watcher():
                 is_unauth = "\tunauthorized" in out
 
                 if is_device:
-                    if last_status != "authorized":
+                    # Kiểm tra xem các cổng reverse còn tồn tại hay đã bị Quest ngắt do sleep/chuyển tab
+                    res_rev = subprocess.run(["adb", "reverse", "--list"], capture_output=True, text=True, timeout=2)
+                    has_8443 = "tcp:8443" in res_rev.stdout
+                    
+                    if not has_8443 or last_status != "authorized":
                         res_setup = subprocess.run(["bash", script_path], capture_output=True, text=True, timeout=5)
                         if res_setup.returncode == 0:
-                            print("\n" + "=" * 55)
-                            print("[ADB USB] ĐÃ KẾT NỐI VÀ CHUYỂN TIẾP CỔNG THÀNH CÔNG!")
-                            print("-> Hãy mở Meta Quest Browser trên kính và truy cập:")
-                            print("   https://localhost:8443")
-                            print("=" * 55 + "\n")
+                            if last_status != "authorized":
+                                print("\n" + "=" * 55)
+                                print("[ADB USB] ĐÃ KẾT NỐI VÀ CHUYỂN TIẾP CỔNG THÀNH CÔNG!")
+                                print("-> Hãy mở Meta Quest Browser trên kính và truy cập:")
+                                print("   https://localhost:8443")
+                                print("=" * 55 + "\n")
+                            else:
+                                print("[ADB USB] Đã tự động khôi phục cổng chuyển tiếp bị rớt ngầm!")
                             last_status = "authorized"
                 elif is_unauth:
                     if last_status != "unauthorized":
