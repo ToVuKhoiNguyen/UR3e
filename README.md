@@ -381,6 +381,13 @@ Khi cắm cáp USB giữa PC và kính Meta Quest:
    ```
 4. Bấm **Advanced** -> **Proceed to localhost (Tiếp tục truy cập an toàn)** -> Bấm **Enter VR** màu xanh lục để bắt đầu điều khiển.
 
+* **Xử lý sự cố khi không tải được trang (`This site can't be reached` hoặc reload không được):**
+  Nếu trình duyệt kính không tải được hoặc cổng chuyển tiếp bị treo, chạy lệnh sau ở terminal máy tính để khởi động lại dịch vụ ADB và thiết lập lại toàn bộ cổng chuyển tiếp:
+  ```bash
+  adb kill-server && adb start-server
+  ./teleop_quest/setup_quest_adb.sh
+  ```
+
 #### 3.7. Trực Quan Hóa Mô Hình Tay Cầm Meta Quest 3/3S Đồng Bộ Với Gizmo
 Mô hình tay cầm VR hoạt động như một bản sao kỹ thuật số (Digital Twin) trực quan đồng bộ cùng Gizmo trên giao diện Viser 3D:
 - **Hiển thị song song cùng Gizmo:** Gizmo 3D (các trục mũi tên tọa độ Đỏ/Xanh lá/Xanh dương) đặt chính xác tại điểm TCP của robot, trong khi mô hình tay cầm 3D đặt ngay phía trước điểm TCP theo đúng hướng di chuyển, cung cấp góc nhìn kép trực quan hoàn hảo.
