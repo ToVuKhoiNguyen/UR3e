@@ -384,13 +384,16 @@ class QuestServer:
                                 self._drive_mode = bool(data.get("drive_mode", False))
                             elif data.get("type") == "go_home":
                                 self._home_requested = True
+                                if self._latest_frame is not None:
+                                    self._latest_frame["home"] = True
+                                    self._latest_frame["thumbstick_click"] = True
                             elif data.get("type") == "toggle_gripper":
                                 self._gripper_toggle_requested = True
                             else:
                                 self._latest_frame = data
                                 self._last_seen = time.time()
                                 self._connected = True
-                                if data.get("home_btn"):
+                                if data.get("home_btn") or data.get("home") or data.get("thumbstick_click"):
                                     self._home_requested = True
                                 if data.get("gripper_toggle_btn"):
                                     self._gripper_toggle_requested = True

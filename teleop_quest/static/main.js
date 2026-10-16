@@ -291,7 +291,7 @@
                 }, 350);
             }
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'go_home' }));
+                ws.send(JSON.stringify({ type: 'go_home', home: true, thumbstick_click: true }));
             } else {
                 fetch('/api/go_home').catch(() => {});
             }
@@ -459,6 +459,7 @@
                         if (s !== activeSource && s.gamepad && s.gamepad.buttons) {
                             if (s.gamepad.buttons.length > 3 && s.gamepad.buttons[3].pressed) {
                                 triggerGoHome(s);
+                                thumbstickPressed = true;
                             }
                             if (s.gamepad.buttons.length > 4 && s.gamepad.buttons[4].pressed) {
                                 gripperRawPressed = true;
@@ -482,6 +483,11 @@
                     let pos = pose.transform.position;
                     let quat = pose.transform.orientation;
 
+                    let stickTilted = false;
+                    if (activeSource.gamepad && activeSource.gamepad.axes && activeSource.gamepad.axes.length >= 4) {
+                        stickTilted = Math.abs(activeSource.gamepad.axes[2]) > 0.15 || Math.abs(activeSource.gamepad.axes[3]) > 0.15;
+                    }
+
                     ws.send(JSON.stringify({
                         t: Date.now() / 1000.0,
                         hand: activeSource.handedness || "unknown",
@@ -493,6 +499,11 @@
                         gripper_toggle_btn: gripperToggleTriggered,
                         gripper_btn: gripperBtnPressed,
                         button_a: gripperRawPressed,
+                        button_b: driveTogglePressed,
+                        thumbstick: thumbstickPressed || stickTilted,
+                        thumbstick_click: thumbstickPressed,
+                        joystick_tilt: stickTilted,
+                        home: thumbstickPressed,
                         drive_mode: uiLocked
                     }));
                     

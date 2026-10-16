@@ -1,3 +1,4 @@
+import os
 import time
 import subprocess
 import cv2
@@ -6,6 +7,8 @@ import torch
 import transforms3d
 from curobo.viewer import ViserVisualizer
 from curobo.types import ContentPath, JointState
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 JOINT_NAMES = [
     'shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
@@ -30,6 +33,90 @@ class StatusProxy:
 
     def __str__(self):
         return self._val
+
+
+class TargetWidgetWrapper:
+    """
+    Wrapper đồng bộ tọa độ giữa Gizmo và Mô hình tay cầm VR:
+      - Vị trí: Tay cầm đặt phía trước TCP (offset 8.5cm theo phương cánh tay/chuyển động), không bị trùng sát vào đầu tay máy.
+      - Góc quay: Đồng bộ 1:1 với Gizmo (R_ctrl = R_gizmo * R_align), tại Home đứng thẳng tự nhiên và chĩa mũi theo đúng hướng di chuyển.
+    """
+    def __init__(self, gizmo, ctrl_frame, offset_dist=0.085, offset_right_dist=0.075, r_align=None, get_arm_theta=None):
+        self._gizmo = gizmo
+        self._ctrl_frame = ctrl_frame
+        self._offset_dist = float(offset_dist)
+        self._offset_right_dist = float(offset_right_dist)
+        self._r_align = r_align
+        self._get_arm_theta = get_arm_theta
+
+        @self._gizmo.on_update
+        def _(_):
+            self._update_ctrl_pose(self._gizmo.position, self._gizmo.wxyz)
+
+    def _calc_arm_vectors(self, pos):
+        theta = None
+        if self._get_arm_theta is not None:
+            try:
+                theta = self._get_arm_theta()
+            except Exception:
+                pass
+        if theta is None:
+            x, y = pos[0], pos[1]
+            r = np.hypot(x, y)
+            theta = np.arctan2(y, x) if r > 0.03 else -np.pi / 2
+
+        c, s = np.cos(theta), np.sin(theta)
+        v_fwd = np.array([c, s, 0.0], dtype=float)
+        v_right = np.array([s, -c, 0.0], dtype=float)
+        return v_fwd, v_right
+
+    def _update_ctrl_pose(self, pos, wxyz):
+        v_fwd, v_right = self._calc_arm_vectors(pos)
+        ctrl_pos = np.array(pos, dtype=float) + self._offset_dist * v_fwd + self._offset_right_dist * v_right
+        self._ctrl_frame.position = tuple(ctrl_pos)
+        self._sync_orientation(wxyz)
+
+    def _sync_orientation(self, gizmo_wxyz):
+        if self._r_align is not None:
+            try:
+                r_gizmo = transforms3d.quaternions.quat2mat(gizmo_wxyz)
+                r_ctrl = r_gizmo @ self._r_align
+                q_ctrl = transforms3d.quaternions.mat2quat(r_ctrl)
+                self._ctrl_frame.wxyz = tuple(q_ctrl)
+            except Exception:
+                pass
+
+    @property
+    def position(self):
+        return self._gizmo.position
+
+    @position.setter
+    def position(self, val):
+        self._gizmo.position = val
+        self._update_ctrl_pose(val, self._gizmo.wxyz)
+
+    @property
+    def wxyz(self):
+        return self._gizmo.wxyz
+
+    @wxyz.setter
+    def wxyz(self, val):
+        self._gizmo.wxyz = val
+        self._sync_orientation(val)
+
+    @property
+    def visible(self):
+        return self._gizmo.visible
+
+    @visible.setter
+    def visible(self, val):
+        self._gizmo.visible = val
+
+    def __getattr__(self, name):
+        return getattr(self._gizmo, name)
+
+
+
 
 
 class TeleopViserUI:
@@ -72,14 +159,97 @@ class TeleopViserUI:
             angle = np.linalg.norm(axis)
             quat = transforms3d.quaternions.axangle2quat(axis / angle, angle) if angle > 1e-6 else [1.0, 0.0, 0.0, 0.0]
 
-        self.target_widget = self.server.scene.add_transform_controls(
+        # Lấy góc quay của khớp đế ban đầu q0
+        init_q0 = float(init_joints[0]) if (init_joints is not None and len(init_joints) > 0) else 0.0
+        self._current_q0 = init_q0
+
+        # Tính toán ma trận căn chỉnh R_align để tay cầm đồng bộ 1:1 với Gizmo:
+        # Tại tư thế Home, tay cầm đứng thẳng tự nhiên (trục cán hướng xuống -Z)
+        # và mũi tay cầm chĩa theo đúng phương vươn của cánh tay robot (v_fwd = [cos(q0), sin(q0), 0]):
+        R_home = transforms3d.quaternions.quat2mat(quat)
+        c0, s0 = np.cos(init_q0), np.sin(init_q0)
+        R_upright = np.array([
+            [-s0,   c0,  0.0],
+            [ c0,   s0,  0.0],
+            [ 0.0,  0.0, -1.0]
+        ], dtype=float)
+        self._r_align = R_home.T @ R_upright
+        init_ctrl_wxyz = tuple(transforms3d.quaternions.mat2quat(R_upright))
+
+        # Vector hướng vươn ban đầu và hướng bên phải của cánh tay robot
+        v_fwd_init = np.array([c0, s0, 0.0], dtype=float)
+        v_right_init = np.array([s0, -c0, 0.0], dtype=float)
+        self._ctrl_offset_dist = 0.085       # Khoảng cách an toàn 8.5cm phía trước TCP
+        self._ctrl_offset_right = 0.075      # Dịch sang phải 7.5cm để quan sát song song cùng Gizmo
+
+        # 1. Tạo Gizmo transform controls độc lập tại root level (mặc định hiển thị đồng thời với tay cầm)
+        self._raw_gizmo = self.server.scene.add_transform_controls(
             "target_pose",
             depth_test=False,
             position=pos,
             wxyz=quat,
             scale=0.18,
-            disable_sliders=False
+            disable_sliders=False,
+            visible=True
         )
+
+        # 2. Tạo Frame điều khiển tay cầm VR độc lập tại root level (đặt trước đầu tay máy 8.5cm, lệch phải 7.5cm):
+        ctrl_init_pos = tuple(np.array(pos) + self._ctrl_offset_dist * v_fwd_init + self._ctrl_offset_right * v_right_init)
+        self._ctrl_frame = self.server.scene.add_frame(
+            "vr_controller_frame",
+            position=ctrl_init_pos,
+            wxyz=init_ctrl_wxyz,
+            show_axes=False
+        )
+
+        # 3. Target widget proxy đồng bộ tọa độ và góc xoay 1:1 cho main_quest và các module khác
+        self.target_widget = TargetWidgetWrapper(
+            self._raw_gizmo,
+            self._ctrl_frame,
+            offset_dist=self._ctrl_offset_dist,
+            offset_right_dist=self._ctrl_offset_right,
+            r_align=self._r_align,
+            get_arm_theta=lambda: self._current_q0
+        )
+
+        # 4. Nạp mô hình 3D tay cầm Meta Quest 3/3S gắn vào vr_controller_frame:
+        # - Trùng vị trí Gizmo, xoay bám sát cử động cổ tay thực tế của người dùng từ kính VR
+        # - Độ trong suốt 60% (baseColorFactor alpha = 0.60, alphaMode = BLEND)
+        # - 5 biến thể màu sắc phản hồi trực quan phím bấm:
+        #   + idle: trắng/xám (trạng thái nghỉ)
+        #   + translate: xanh lá (bóp Cò)
+        #   + rotate: cam/vàng (bóp Grip)
+        #   + both: xanh dương ngọc (giữ cả Cò + Grip)
+        #   + gripper: tím hồng (bấm nút A hút/kẹp)
+        self._ctrl_handles = {}
+        self._current_ctrl_mode = "idle"
+        ctrl_variants = {
+            "idle": os.path.join(BASE_DIR, "assets", "quest3_ctrl_idle.glb"),
+            "translate": os.path.join(BASE_DIR, "assets", "quest3_ctrl_translate.glb"),
+            "rotate": os.path.join(BASE_DIR, "assets", "quest3_ctrl_rotate.glb"),
+            "both": os.path.join(BASE_DIR, "assets", "quest3_ctrl_both.glb"),
+            "gripper": os.path.join(BASE_DIR, "assets", "quest3_ctrl_gripper.glb"),
+            "btn_b": os.path.join(BASE_DIR, "assets", "quest3_ctrl_btn_b.glb"),
+            "joystick": os.path.join(BASE_DIR, "assets", "quest3_ctrl_joystick.glb"),
+            "home": os.path.join(BASE_DIR, "assets", "quest3_ctrl_home.glb"),
+        }
+        fallback_glb = os.path.join(BASE_DIR, "assets", "quest3_controller_right.glb")
+        for mode, path in ctrl_variants.items():
+            target_file = path if os.path.exists(path) else fallback_glb
+            if os.path.exists(target_file):
+                try:
+                    with open(target_file, "rb") as f:
+                        glb_bytes = f.read()
+                    self._ctrl_handles[mode] = self.server.scene.add_glb(
+                        f"vr_controller_frame/controller_{mode}",
+                        glb_data=glb_bytes,
+                        position=(0.0, 0.0, 0.0),
+                        wxyz=(1.0, 0.0, 0.0, 0.0),
+                        scale=1.0,
+                        visible=(mode == "idle")
+                    )
+                except Exception as e:
+                    print(f"[Viser UI] Cảnh báo không thể nạp mô hình tay cầm {mode}: {e}")
 
         # Trạng thái hệ thống hiển thị dạng Dashboard Markdown compact
         self._val_status = "Waiting..."
@@ -161,8 +331,50 @@ class TeleopViserUI:
             # 3. Nút khôi phục an toàn (Full width bên dưới cụm 2x2)
             self.btn_home = self.server.gui.add_button("Go to Home")
 
+        # Thư mục điều khiển hiển thị 3D: Gizmo và Tay Cầm trên cùng một hàng ngang
+        with self.server.gui.add_folder("Hiển thị 3D", expand_by_default=True):
+            self.server.gui.add_html("""
+            <div id="vis-toggle-anchor" style="display:none;"></div>
+            <style>
+            div:has(> div > #vis-toggle-anchor) {
+                display: flex !important;
+                flex-wrap: wrap !important;
+                row-gap: 4px !important;
+            }
+            div:has(> div > #vis-toggle-anchor) > div:has(#vis-toggle-anchor) {
+                display: none !important;
+            }
+            div:has(> div > #vis-toggle-anchor) > div:nth-child(2),
+            div:has(> div > #vis-toggle-anchor) > div:nth-child(3) {
+                width: 50% !important;
+                box-sizing: border-box !important;
+                display: flex !important;
+                align-items: center !important;
+            }
+            div:has(> div > #vis-toggle-anchor) > div:nth-child(2) > div,
+            div:has(> div > #vis-toggle-anchor) > div:nth-child(3) > div {
+                width: 100% !important;
+                padding-bottom: 0 !important;
+            }
+            div:has(> div > #vis-toggle-anchor) .mantine-Flex-root {
+                justify-content: space-between !important;
+                width: 100% !important;
+            }
+            </style>
+            """)
+            self.cb_show_gizmo = self.server.gui.add_checkbox("Gizmo", initial_value=True)
+            self.cb_show_controller = self.server.gui.add_checkbox("Tay Cầm", initial_value=True)
+
+            @self.cb_show_gizmo.on_update
+            def _(_):
+                self._raw_gizmo.visible = self.cb_show_gizmo.value
+
+            @self.cb_show_controller.on_update
+            def _(_):
+                self.update_controller_visual()
+
         # Thư mục Camera cổ tay thu gọn (collapsible, có thể gập mở tùy ý)
-        with self.server.gui.add_folder("Wrist Camera Live Preview", expand_by_default=True):
+        with self.server.gui.add_folder("Wrist Camera", expand_by_default=True):
             init_img = np.full((150, 200, 3), 200, dtype=np.uint8)
             self.ui_cam_preview = self.server.gui.add_image(init_img)
 
@@ -193,6 +405,8 @@ class TeleopViserUI:
 
     def update_robot_state(self, q: list):
         """Cập nhật dáng robot thực tế lên Viser 3D"""
+        if q is not None and len(q) > 0:
+            self._current_q0 = float(q[0])
         js = JointState.from_position(
             torch.tensor([q], device="cuda", dtype=torch.float32),
             joint_names=JOINT_NAMES
@@ -215,3 +429,51 @@ class TeleopViserUI:
 
     def set_grasp_state(self, is_grasped: bool):
         self.ui_grasp_state.value = "Holding" if is_grasped else "Empty"
+
+    def update_controller_visual(
+        self,
+        is_translating: bool = False,
+        is_rotating: bool = False,
+        is_gripper_btn: bool = False,
+        is_btn_b: bool = False,
+        is_joystick: bool = False,
+        is_home: bool = False
+    ):
+        """
+        Cập nhật màu sắc phím bấm của mô hình tay cầm VR theo thời gian thực (8 trạng thái màu độc lập):
+          - Bóp Cò (Trigger): Sáng xanh lá (Tịnh tiến).
+          - Bóp Grip: Sáng cam (Xoay 3 trục).
+          - Giữ cả Cò + Grip: Sáng xanh dương ngọc (Phối hợp 6-DOF).
+          - Bấm nút A (Gripper Toggle): Sáng tím hồng (Đóng/mở hút kẹp).
+          - Bấm nút B / Y: Sáng vàng kim (Đổi Drive Mode).
+          - Gạt cần Joystick: Sáng tím Violet (Điều hướng / Analog tilt).
+          - Nhấn Joystick / Về Home: Sáng xanh dương đậm Royal Blue (Lệnh Go Home).
+          - Trạng thái nghỉ: Xám trắng tự nhiên (60% độ trong suốt).
+        """
+        if not hasattr(self, "cb_show_controller") or not self.cb_show_controller.value:
+            for h in self._ctrl_handles.values():
+                h.visible = False
+            return
+
+        if is_home:
+            target_mode = "home"
+        elif is_joystick:
+            target_mode = "joystick"
+        elif is_btn_b:
+            target_mode = "btn_b"
+        elif is_gripper_btn:
+            target_mode = "gripper"
+        elif is_translating and is_rotating:
+            target_mode = "both"
+        elif is_translating:
+            target_mode = "translate"
+        elif is_rotating:
+            target_mode = "rotate"
+        else:
+            target_mode = "idle"
+
+        if target_mode != self._current_ctrl_mode or not any(h.visible for h in self._ctrl_handles.values()):
+            self._current_ctrl_mode = target_mode
+            for mode, h in self._ctrl_handles.items():
+                h.visible = (mode == target_mode)
+

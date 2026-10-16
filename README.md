@@ -381,6 +381,27 @@ Khi cắm cáp USB giữa PC và kính Meta Quest:
    ```
 4. Bấm **Advanced** -> **Proceed to localhost (Tiếp tục truy cập an toàn)** -> Bấm **Enter VR** màu xanh lục để bắt đầu điều khiển.
 
+#### 3.7. Trực Quan Hóa Mô Hình Tay Cầm Meta Quest 3/3S Đồng Bộ Với Gizmo
+Mô hình tay cầm VR hoạt động như một bản sao kỹ thuật số (Digital Twin) trực quan đồng bộ cùng Gizmo trên giao diện Viser 3D:
+- **Hiển thị song song cùng Gizmo:** Gizmo 3D (các trục mũi tên tọa độ Đỏ/Xanh lá/Xanh dương) đặt chính xác tại điểm TCP của robot, trong khi mô hình tay cầm 3D đặt ngay phía trước điểm TCP theo đúng hướng di chuyển, cung cấp góc nhìn kép trực quan hoàn hảo.
+- **Căn chỉnh theo đúng hướng di chuyển (Arm-Plane Forward):**
+  - Mũi tay cầm và các phím bấm luôn tự động quay theo đúng hướng vươn của cánh tay robot: $\vec{v}_{\text{forward}} = [\cos(q_0), \sin(q_0), 0.0]$.
+  - Cán cầm luôn đứng thẳng tự nhiên vuông góc mặt đất (hướng xuống $-Z$), mặt phím ngửa lên trên để dễ quan sát phím bấm.
+- **Khoảng cách đệm an toàn động & Bố trí song song (Offset 8.5cm tiến, 7.5cm lệch phải):** Tay cầm luôn được giữ ở khoảng cách $8.5\text{cm}$ phía trước và dịch sang mạn phải $7.5\text{cm}$ theo hệ quy chiếu cánh tay robot ($\vec{v}_{\text{forward}}$ và $\vec{v}_{\text{right}}$). Bố cục này giúp Gizmo (tâm TCP) và tay cầm 3D đứng cạnh nhau song song rất thoáng đãng, hoàn toàn không che khuất nhau dù quan sát từ bất kỳ góc nhìn nào.
+- **Đồng bộ góc xoay 1:1 với Gizmo ($R_{\text{ctrl}} = R_{\text{gizmo}} \cdot R_{\text{align}}$):** Khi người dùng bóp Grip xoay cổ tay thực tế một góc biến thiên $\Delta R$, cả Gizmo và tay cầm 3D lập tức xoay đồng bộ $1:1$ theo đúng chuyển động đó.
+- **Phản hồi trạng thái phím bấm trực quan (Interactive Button Feedback - 8 Trạng Thái Độc Lập):**
+  - **Trạng thái nghỉ (Idle):** Màu xám trắng tự nhiên ($60\%$ opacity).
+  - **Bóp Cò (Trigger):** Sáng màu xanh lá cây (báo hiệu điều khiển tịnh tiến).
+  - **Bóp Grip:** Sáng màu vàng cam (báo hiệu điều khiển xoay 3 trục).
+  - **Bóp cả 2 phím (Trigger + Grip):** Sáng màu xanh dương ngọc (báo hiệu phối hợp 6-DOF).
+  - **Bấm nút A / X (Gripper):** Sáng màu tím hồng / Magenta (báo hiệu thao tác đóng/mở ngàm kẹp).
+  - **Bấm nút B / Y:** Sáng màu vàng kim / Gold (báo hiệu chuyển đổi Drive Mode).
+  - **Xoay / Gạt cần Joystick (Analog Tilt):** Sáng màu tím hoa cà / Violet (báo hiệu thao tác điều hướng joystick).
+  - **Nhấn Joystick / Đang chạy về Home (Go Home):** Sáng màu xanh dương công nghệ / Royal Blue (báo hiệu lệnh và quá trình đưa robot về Home an toàn).
+- **Thanh công cụ "Hiển thị 3D" trên Viser (Bật/Tắt độc lập):**
+  - Hai nút chuyển đổi xếp gọn gàng trên cùng một hàng ngang: `Gizmo` (mặc định bật) và `Tay Cầm` (mặc định bật).
+  - Tách biệt độc lập $100\%$: Người dùng có thể bật/tắt linh hoạt cả hai tùy ý (xem cả hai, chỉ xem tay cầm, chỉ xem gizmo, hoặc ẩn cả hai).
+
 ---
 
 ## 6. Hướng Dẫn Triển Khai Trên Cánh Tay Robot UR3e Thực Tế

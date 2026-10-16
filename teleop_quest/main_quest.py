@@ -104,6 +104,7 @@ def register_ui_callbacks(
         is_navigating_home.set()
         teleop.enabled = False
         ui.cb_teleop.value = False
+        ui.update_controller_visual(is_home=True)
         threading.Thread(
             target=home_planner.go_home,
             args=(
@@ -283,6 +284,7 @@ def main():
                 teleop.enabled = False
                 ui.cb_teleop.value = False
                 quest_server.send_haptic(1.0, 300)
+                ui.update_controller_visual(is_home=True)
                 threading.Thread(
                     target=home_planner.go_home,
                     args=(
@@ -352,6 +354,24 @@ def main():
         if raw_vr_gripper and not _last_vr_gripper_raw:
             toggle_triggered = True
         _last_vr_gripper_raw = raw_vr_gripper
+
+        # Cập nhật màu sắc & phím bấm của mô hình tay cầm VR trên Viser (8 trạng thái trực quan)
+        _is_trig = bool(vr_frame.get("trigger", False)) if vr_frame else False
+        _is_grip = bool(vr_frame.get("grip", False)) if vr_frame else False
+        _is_btn_b = bool(vr_frame.get("button_b", False) or vr_frame.get("button_y", False)) if vr_frame else False
+        _is_joy_tilt = bool(vr_frame.get("joystick_tilt", False)) if vr_frame else False
+        _is_home = is_navigating_home.is_set() or (bool(vr_frame.get("thumbstick_click", False) or vr_frame.get("home", False)) if vr_frame else False)
+        if vr_frame and vr_frame.get("thumbstick", False) and not _is_home and not _is_joy_tilt:
+            _is_joy_tilt = True
+
+        ui.update_controller_visual(
+            is_translating=_is_trig,
+            is_rotating=_is_grip,
+            is_gripper_btn=raw_vr_gripper,
+            is_btn_b=_is_btn_b,
+            is_joystick=_is_joy_tilt,
+            is_home=_is_home
+        )
 
         if toggle_triggered:
             _gripper_active = not _gripper_active
