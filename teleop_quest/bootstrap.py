@@ -86,11 +86,12 @@ def start_adb_watcher():
     watcher_thread = threading.Thread(target=_adb_watcher, daemon=True)
     watcher_thread.start()
 
-def print_startup_banner(local_ip: str, quest_port: int = 8443, viser_port: int = 8080):
+def print_startup_banner(local_ip: str, quest_port: int = 8443, viser_port: int = 8080, ursim_port: int = 6080):
     """In thông tin địa chỉ truy cập hệ thống"""
     print("\n" + "=" * 50)
     print(f"IP MÁY CHỦ: {local_ip}")
     print(f"-> Viser Dashboard: http://localhost:{viser_port}")
+    print(f"-> URSim PolyScope (noVNC): http://localhost:{ursim_port}/vnc.html")
     print(f"-> VR WebXR (Wi-Fi): https://{local_ip}:{quest_port}")
     print(f"-> VR WebXR (Cáp USB): https://localhost:{quest_port}")
     print("=" * 50 + "\n")

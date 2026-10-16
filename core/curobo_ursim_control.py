@@ -96,6 +96,7 @@ def setup_ursim(timeout: float = 35.0) -> bool:
     """Wait for URControl to be ready, then power-on robot and release brakes via Dashboard. Returns True when RUNNING."""
     start_time = time.time()
     print("[URSim] Đang kiểm tra trạng thái robot qua Dashboard (Port 29999)...")
+    print("[URSim] Giao diện Teach Pendant PolyScope (noVNC): http://localhost:6080/vnc.html")
 
     while time.time() - start_time < timeout:
         s = None
