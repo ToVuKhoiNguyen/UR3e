@@ -86,12 +86,27 @@ def start_adb_watcher():
     watcher_thread = threading.Thread(target=_adb_watcher, daemon=True)
     watcher_thread.start()
 
+def get_ursim_ip(default: str = "192.168.56.101") -> str:
+    """Lấy địa chỉ IP mạng nội bộ của container Docker URSim"""
+    try:
+        res = subprocess.run(
+            ["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", "ursim"],
+            capture_output=True, text=True, timeout=1.0
+        )
+        ip = res.stdout.strip()
+        if ip:
+            return ip
+    except Exception:
+        pass
+    return default
+
 def print_startup_banner(local_ip: str, quest_port: int = 8443, viser_port: int = 8080, ursim_port: int = 6080):
     """In thông tin địa chỉ truy cập hệ thống"""
+    ursim_ip = get_ursim_ip()
     print("\n" + "=" * 50)
     print(f"IP MÁY CHỦ: {local_ip}")
     print(f"-> Viser Dashboard: http://localhost:{viser_port}")
-    print(f"-> URSim PolyScope (noVNC): http://localhost:{ursim_port}/vnc.html")
+    print(f"-> URSim PolyScope (noVNC): http://{ursim_ip}:{ursim_port}/vnc.html")
     print(f"-> VR WebXR (Wi-Fi): https://{local_ip}:{quest_port}")
     print(f"-> VR WebXR (Cáp USB): https://localhost:{quest_port}")
     print("=" * 50 + "\n")
